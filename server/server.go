@@ -12,7 +12,7 @@ import (
 
 type Server struct {
 	wallet     *wallet.Wallet
-	//quantumBot *QuantumBot // NEW: Quantum bot instance
+	quantumBot *QuantumBot // NEW: Quantum bot instance
 }
 
 func New() *Server {
@@ -21,9 +21,9 @@ func New() *Server {
 	}
 	
 	// Initialize quantum bot
-	//baseServer.quantumBot = NewQuantumBot(baseServer)
+	baseServer.quantumBot = NewQuantumBot(baseServer)
 	
-	//return baseServer
+	return baseServer
 }
 
 func (s *Server) Run(port string) error {
