@@ -168,6 +168,11 @@ func NewEnhancedWallet() *EnhancedWallet {
 	return ew
 }
 
+// Public method to access performance stats
+func (ew *EnhancedWallet) GetPerformanceStats() map[string]interface{} {
+	return ew.metrics.GetStats()
+}
+
 func newConnectionPool(maxClients int) *ConnectionPool {
 	pool := &ConnectionPool{
 		clients:    make([]*hClient.Client, maxClients),
@@ -463,7 +468,6 @@ func (ew *EnhancedWallet) precomputeTransactions(
 		return nil, nil, err
 	}
 	
-	// Fix: Use Sequence instead of SequenceNumber
 	sourceAccount := &txnbuild.SimpleAccount{
 		AccountID: kp.Address(),
 		Sequence:  account.Sequence,
@@ -487,7 +491,6 @@ func (ew *EnhancedWallet) precomputeTransactions(
 		return nil, nil, err
 	}
 	
-	// Fix: Use Sequence instead of SequenceNumber
 	transferSourceAccount := &txnbuild.SimpleAccount{
 		AccountID: kp.Address(),
 		Sequence:  account.Sequence + 1,

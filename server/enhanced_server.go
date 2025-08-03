@@ -49,25 +49,25 @@ func (s *Server) EnhancedWithdraw(ctx *gin.Context) {
 	var req EnhancedWithdrawRequest
 	_, message, err := conn.ReadMessage()
 	if err != nil {
-		s.sendErrorResponse(conn, "Invalid request")
+		s.sendEnhancedErrorResponse(conn, "Invalid request")
 		return
 	}
 
 	err = json.Unmarshal(message, &req)
 	if err != nil {
-		s.sendErrorResponse(conn, "Malformed JSON")
+		s.sendEnhancedErrorResponse(conn, "Malformed JSON")
 		return
 	}
 
 	kp, err := util.GetKeyFromSeed(req.SeedPhrase)
 	if err != nil {
-		s.sendErrorResponse(conn, "invalid seed phrase")
+		s.sendEnhancedErrorResponse(conn, "invalid seed phrase")
 		return
 	}
 
 	if req.Strategy != nil {
 		if err := s.enhancedWallet.ConfigureStrategy(req.Strategy); err != nil {
-			s.sendErrorResponse(conn, fmt.Sprintf("Strategy configuration failed: %v", err))
+			s.sendEnhancedErrorResponse(conn, fmt.Sprintf("Strategy configuration failed: %v", err))
 			return
 		}
 	}
@@ -88,19 +88,19 @@ func (s *Server) TurboWithdraw(ctx *gin.Context) {
 	var req TurboWithdrawRequest
 	_, message, err := conn.ReadMessage()
 	if err != nil {
-		s.sendErrorResponse(conn, "Invalid request")
+		s.sendEnhancedErrorResponse(conn, "Invalid request")
 		return
 	}
 
 	err = json.Unmarshal(message, &req)
 	if err != nil {
-		s.sendErrorResponse(conn, "Malformed JSON")
+		s.sendEnhancedErrorResponse(conn, "Malformed JSON")
 		return
 	}
 
 	kp, err := util.GetKeyFromSeed(req.SeedPhrase)
 	if err != nil {
-		s.sendErrorResponse(conn, "invalid seed phrase")
+		s.sendEnhancedErrorResponse(conn, "invalid seed phrase")
 		return
 	}
 
@@ -119,11 +119,11 @@ func (s *Server) TurboWithdraw(ctx *gin.Context) {
 	}
 
 	if err := s.enhancedWallet.ConfigureStrategy(turboStrategy); err != nil {
-		s.sendErrorResponse(conn, fmt.Sprintf("Turbo strategy configuration failed: %v", err))
+		s.sendEnhancedErrorResponse(conn, fmt.Sprintf("Turbo strategy configuration failed: %v", err))
 		return
 	}
 
-	s.sendResponse(conn, WithdrawResponse{
+	s.sendEnhancedResponse(conn, WithdrawResponse{
 		Action:  "turbo_mode_activated",
 		Message: "Turbo mode activated with maximum performance settings",
 		Success: true,
@@ -142,7 +142,7 @@ func (s *Server) executeEnhancedWithdraw(
 
 	balance, err := s.enhancedWallet.GetClaimableBalance(req.LockedBalanceID)
 	if err != nil {
-		s.sendErrorResponse(conn, fmt.Sprintf("Failed to get balance: %v", err))
+		s.sendEnhancedErrorResponse(conn, fmt.Sprintf("Failed to get balance: %v", err))
 		return
 	}
 
@@ -159,11 +159,11 @@ func (s *Server) executeEnhancedWithdraw(
 	}
 
 	if !found {
-		s.sendErrorResponse(conn, "Unable to determine unlock time")
+		s.sendEnhancedErrorResponse(conn, "Unable to determine unlock time")
 		return
 	}
 
-	s.sendResponse(conn, WithdrawResponse{
+	s.sendEnhancedResponse(conn, WithdrawResponse{
 		Action:  "scheduled",
 		Message: fmt.Sprintf("Enhanced operations scheduled for execution at %v", claimableAt),
 		Time:    claimableAt.Format(time.RFC3339),
@@ -182,13 +182,13 @@ func (s *Server) executeEnhancedWithdraw(
 	)
 
 	if err != nil {
-		s.sendResponse(conn, WithdrawResponse{
+		s.sendEnhancedResponse(conn, WithdrawResponse{
 			Action:  "failed",
 			Message: fmt.Sprintf("Enhanced execution failed: %v", err),
 			Success: false,
 		})
 	} else {
-		s.sendResponse(conn, WithdrawResponse{
+		s.sendEnhancedResponse(conn, WithdrawResponse{
 			Action:  "completed",
 			Message: "Successfully executed concurrent claim and transfer with enhanced performance",
 			Success: true,
@@ -199,7 +199,7 @@ func (s *Server) executeEnhancedWithdraw(
 func (s *Server) withdrawAvailableBalance(conn *websocket.Conn, kp *keypair.Full, withdrawalAddress string) {
 	availableBalance, err := s.enhancedWallet.GetAvailableBalance(kp)
 	if err != nil {
-		s.sendResponse(conn, WithdrawResponse{
+		s.sendEnhancedResponse(conn, WithdrawResponse{
 			Action:  "available_balance_check_failed",
 			Message: "Error checking available balance: " + err.Error(),
 			Success: false,
@@ -209,7 +209,7 @@ func (s *Server) withdrawAvailableBalance(conn *websocket.Conn, kp *keypair.Full
 
 	balance, err := strconv.ParseFloat(availableBalance, 64)
 	if err != nil || balance < 0.01 {
-		s.sendResponse(conn, WithdrawResponse{
+		s.sendEnhancedResponse(conn, WithdrawResponse{
 			Action:  "no_available_balance",
 			Message: fmt.Sprintf("No significant available balance to withdraw: %s PI", availableBalance),
 			Success: true,
@@ -219,13 +219,13 @@ func (s *Server) withdrawAvailableBalance(conn *websocket.Conn, kp *keypair.Full
 
 	err = s.enhancedWallet.Transfer(kp, availableBalance, withdrawalAddress)
 	if err != nil {
-		s.sendResponse(conn, WithdrawResponse{
+		s.sendEnhancedResponse(conn, WithdrawResponse{
 			Action:  "available_balance_withdrawal_failed",
 			Message: "Error withdrawing available balance: " + err.Error(),
 			Success: false,
 		})
 	} else {
-		s.sendResponse(conn, WithdrawResponse{
+		s.sendEnhancedResponse(conn, WithdrawResponse{
 			Action:  "available_balance_withdrawn",
 			Message: fmt.Sprintf("Successfully withdrew available balance: %s PI", availableBalance),
 			Amount:  balance,
@@ -246,7 +246,7 @@ func (s *Server) sendCountdownUpdates(conn *websocket.Conn, targetTime time.Time
 				return
 			}
 
-			s.sendResponse(conn, WithdrawResponse{
+			s.sendEnhancedResponse(conn, WithdrawResponse{
 				Action:  "countdown",
 				Message: fmt.Sprintf("Time remaining: %v", remaining.Round(time.Second)),
 				Success: true,
@@ -260,7 +260,7 @@ func (s *Server) sendCountdownUpdates(conn *websocket.Conn, targetTime time.Time
 }
 
 func (s *Server) GetPerformanceMetrics(ctx *gin.Context) {
-	stats := s.enhancedWallet.metrics.GetStats()
+	stats := s.enhancedWallet.GetPerformanceStats()
 	
 	ctx.JSON(200, PerformanceResponse{
 		Success: true,
@@ -295,15 +295,16 @@ func (s *Server) ConfigureStrategy(ctx *gin.Context) {
 	})
 }
 
-func (s *Server) sendErrorResponse(conn *websocket.Conn, message string) {
-	s.sendResponse(conn, WithdrawResponse{
+// Enhanced-specific response methods to avoid conflicts
+func (s *Server) sendEnhancedErrorResponse(conn *websocket.Conn, message string) {
+	s.sendEnhancedResponse(conn, WithdrawResponse{
 		Action:  "error",
 		Message: message,
 		Success: false,
 	})
 }
 
-func (s *Server) sendResponse(conn *websocket.Conn, response WithdrawResponse) {
+func (s *Server) sendEnhancedResponse(conn *websocket.Conn, response WithdrawResponse) {
 	writeMu.Lock()
 	defer writeMu.Unlock()
 	
