@@ -8,7 +8,17 @@ import (
 	"time"
 )
 
-// AtomicTimeSync definition - moved here to fix undefined type
+// ENFORCEMENT LEVEL TYPE - Added to fix undefined type
+type EnforcementLevel int
+
+const (
+	EnforcementNone EnforcementLevel = iota
+	EnforcementWarning
+	EnforcementBlock
+	EnforcementTerminate
+)
+
+// AtomicTimeSync definition
 type AtomicTimeSync struct {
 	baseTime        int64 // atomic
 	driftCorrection int64 // atomic (nanoseconds)
@@ -202,8 +212,23 @@ type QuantumTrustChain struct {
 	rootCA        *QuantumCertificate
 	intermediate  []*QuantumCertificate
 	leaf          *QuantumCertificate
-	revocation    *RevocationList
+	revocation    *QuantumRevocationList
 	policies      []TrustPolicy
+}
+
+// RENAMED TO AVOID CONFLICT
+type QuantumRevocationList struct {
+	issuer     string
+	thisUpdate time.Time
+	nextUpdate time.Time
+	revoked    []RevokedCertificate
+	signature  []byte
+}
+
+type RevokedCertificate struct {
+	serialNumber string
+	revocationDate time.Time
+	reason       int
 }
 
 type TrustPolicy struct {
