@@ -246,63 +246,64 @@ func (qb *QuantumBot) setupRoutes() {
 	// WebSocket endpoint for real-time communication
 	qb.server.GET("/ws", qb.handleWebSocket)
 	
-	// Authentication routes
-	auth := qb.server.Group("/auth")
-	{
-		auth.POST("/login", qb.loginHandler.HandleLogin)
-		auth.POST("/logout", qb.loginHandler.HandleLogout)
-		auth.GET("/session", qb.loginHandler.HandleSessionCheck)
-	}
-	
 	// Public API routes
-	api := qb.server.Group("/api/v1")
+	api := qb.server.Group("/api")
 	{
-		api.GET("/status", qb.handleStatus)
-		api.GET("/metrics", qb.handleMetrics)
-		api.POST("/quantum", qb.handleQuantumAction)
+		// Authentication endpoints (moved to /api/)
+		api.POST("/login", qb.loginHandler.HandleLogin)
+		api.POST("/logout", qb.loginHandler.HandleLogout)
+		api.GET("/session", qb.loginHandler.HandleSessionCheck)
 		
-		// Transaction endpoints
-		api.GET("/transactions/monitor", qb.transactionHandler.MonitorTransactions)
-		api.GET("/transactions/history", qb.transactionHandler.GetTransactionHistory)
-		api.POST("/transactions/optimize", qb.transactionHandler.OptimizeTransaction)
-		api.GET("/transactions/conditions", func(c *gin.Context) {
-			conditions := qb.transactionHandler.AnalyzeNetworkConditions()
-			c.JSON(http.StatusOK, conditions)
-		})
+		// v1 API routes
+		v1 := api.Group("/v1")
+		{
+			v1.GET("/status", qb.handleStatus)
+			v1.GET("/metrics", qb.handleMetrics)
+			v1.POST("/quantum", qb.handleQuantumAction)
+			
+			// Transaction endpoints
+			v1.GET("/transactions/monitor", qb.transactionHandler.MonitorTransactions)
+			v1.GET("/transactions/history", qb.transactionHandler.GetTransactionHistory)
+			v1.POST("/transactions/optimize", qb.transactionHandler.OptimizeTransaction)
+			v1.GET("/transactions/conditions", func(c *gin.Context) {
+				conditions := qb.transactionHandler.AnalyzeNetworkConditions()
+				c.JSON(http.StatusOK, conditions)
+			})
+			
+			// Stellar network endpoints
+			v1.GET("/stellar/balance/:address", qb.handleStellarBalance)
+			v1.POST("/stellar/payment", qb.handleStellarPayment)
+			v1.GET("/stellar/transactions/:address", qb.handleStellarTransactions)
+			
+			// PI Network simulation endpoints
+			v1.GET("/pi/balance/:address", qb.handlePIBalance)
+			v1.POST("/pi/transfer", qb.handlePITransfer)
+			v1.GET("/pi/mining/status", qb.handlePIMiningStatus)
+		}
 		
-		// Stellar network endpoints
-		api.GET("/stellar/balance/:address", qb.handleStellarBalance)
-		api.POST("/stellar/payment", qb.handleStellarPayment)
-		api.GET("/stellar/transactions/:address", qb.handleStellarTransactions)
-		
-		// PI Network simulation endpoints
-		api.GET("/pi/balance/:address", qb.handlePIBalance)
-		api.POST("/pi/transfer", qb.handlePITransfer)
-		api.GET("/pi/mining/status", qb.handlePIMiningStatus)
-	}
-	
-	// Protected API routes
-	protected := qb.server.Group("/api/v1/protected")
-	protected.Use(qb.loginHandler.AuthMiddleware())
-	{
-		protected.GET("/swarm/status", func(c *gin.Context) {
-			status := qb.getSwarmStatus()
-			c.JSON(http.StatusOK, status)
-		})
-		
-		protected.GET("/warfare/status", func(c *gin.Context) {
-			status := qb.getNetworkWarfareStatus()
-			c.JSON(http.StatusOK, status)
-		})
-		
-		protected.GET("/quantum/status", func(c *gin.Context) {
-			status := qb.getQuantumStatus()
-			c.JSON(http.StatusOK, status)
-		})
-		
-		protected.GET("/admin/logs", qb.handleAdminLogs)
-		protected.GET("/admin/users", qb.handleAdminUsers)
-		protected.POST("/admin/shutdown", qb.handleAdminShutdown)
+		// Protected API routes
+		protected := api.Group("/v1/protected")
+		protected.Use(qb.loginHandler.AuthMiddleware())
+		{
+			protected.GET("/swarm/status", func(c *gin.Context) {
+				status := qb.getSwarmStatus()
+				c.JSON(http.StatusOK, status)
+			})
+			
+			protected.GET("/warfare/status", func(c *gin.Context) {
+				status := qb.getNetworkWarfareStatus()
+				c.JSON(http.StatusOK, status)
+			})
+			
+			protected.GET("/quantum/status", func(c *gin.Context) {
+				status := qb.getQuantumStatus()
+				c.JSON(http.StatusOK, status)
+			})
+			
+			protected.GET("/admin/logs", qb.handleAdminLogs)
+			protected.GET("/admin/users", qb.handleAdminUsers)
+			protected.POST("/admin/shutdown", qb.handleAdminShutdown)
+		}
 	}
 	
 	// Serve React frontend for all other routes (SPA fallback)
@@ -310,7 +311,7 @@ func (qb *QuantumBot) setupRoutes() {
 		path := c.Request.URL.Path
 		
 		// Check if it's an API route - need to check length first!
-		if len(path) >= 4 && (path[:4] == "/api" || path[:4] == "/auth") {
+		if len(path) >= 4 && path[:4] == "/api" {
 			c.JSON(http.StatusNotFound, gin.H{
 				"error":   "API endpoint not found",
 				"path":    path,
