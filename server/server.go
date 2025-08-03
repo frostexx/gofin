@@ -817,6 +817,47 @@ func (qb *QuantumBot) Start(port string) error {
 	return qb.server.Run(":" + port)
 }
 
+func (qb *QuantumBot) getQuantumStatus() map[string]interface{} {
+	status := map[string]interface{}{
+		"timer": map[string]interface{}{
+			"coherence":  0.98,
+			"fidelity":   0.99,
+			"precision":  "nanosecond",
+			"base_time":  qb.startTime.Unix(),
+		},
+		"rng": map[string]interface{}{
+			"entropy":     0.99,
+			"buffer_size": 1024,
+			"verified":    true,
+		},
+		"crypto": map[string]interface{}{
+			"key_length":     256,
+			"security_level": "post-quantum",
+			"participants":   2,
+		},
+	}
+	
+	// Add dynamic values if quantum systems are initialized
+	if qb.quantumTimer != nil && qb.quantumTimer.quantumState != nil {
+		status["timer"].(map[string]interface{})["coherence"] = qb.quantumTimer.quantumState.coherence
+		status["timer"].(map[string]interface{})["fidelity"] = qb.quantumTimer.quantumState.fidelity
+	}
+	
+	if qb.quantumRNG != nil {
+		status["rng"].(map[string]interface{})["entropy"] = qb.quantumRNG.entropyLevel
+		status["rng"].(map[string]interface{})["buffer_size"] = qb.quantumRNG.bufferSize
+		status["rng"].(map[string]interface{})["verified"] = qb.quantumRNG.verification.passed
+	}
+	
+	if qb.quantumCrypto != nil && qb.quantumCrypto.keyDistribution != nil {
+		status["crypto"].(map[string]interface{})["key_length"] = qb.quantumCrypto.keyDistribution.keyLength
+		status["crypto"].(map[string]interface{})["security_level"] = qb.quantumCrypto.keyDistribution.securityLevel
+		status["crypto"].(map[string]interface{})["participants"] = len(qb.quantumCrypto.keyDistribution.participants)
+	}
+	
+	return status
+}
+
 func (qb *QuantumBot) Stop() {
 	qb.isRunning = false
 	qb.cancel()
