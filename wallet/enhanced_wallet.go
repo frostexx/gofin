@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+	"math"
+	"math/rand"
 	"sync/atomic"
 
 	"github.com/stellar/go/keypair"
@@ -2224,4 +2226,8 @@ func (ew *EnhancedWallet) cleanupResources() {
 	ew.retryManager.deadLetterQueue = make([]TransactionRequest, 0)
 	
 	fmt.Println("🔒 Cleaned up resources")
+}
+
+func init() {
+    rand.Seed(time.Now().UnixNano())
 }
