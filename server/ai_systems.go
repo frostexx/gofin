@@ -13,7 +13,7 @@ type NeuralNetworkPredictor struct {
 	momentum     float64
 	
 	// Historical data
-	trainingData    []TrainingExample
+	trainingData    []AITrainingExample
 	successPatterns []SuccessPattern
 	failurePatterns []FailurePattern
 }
@@ -24,11 +24,20 @@ type NeuralLayer struct {
 	neurons []float64
 }
 
-type TrainingExample struct {
+type AITrainingExample struct {
 	Inputs  []float64
 	Outputs []float64
 	Success bool
 	Timestamp time.Time
+}
+
+// NetworkState definition - moved here to avoid undefined type
+type NetworkState struct {
+	Latency         time.Duration
+	Throughput      float64
+	ErrorRate       float64
+	CongestionLevel float64
+	Timestamp       time.Time
 }
 
 type TimeSeriesAnalyzer struct {
@@ -245,7 +254,7 @@ func (nn *NeuralNetworkPredictor) sigmoid(x float64) float64 {
 	return 1.0 / (1.0 + math.Exp(-x))
 }
 
-func (nn *NeuralNetworkPredictor) train(example TrainingExample) {
+func (nn *NeuralNetworkPredictor) train(example AITrainingExample) {
 	// Forward propagation
 	prediction := nn.predict(example.Inputs)
 	
@@ -352,9 +361,9 @@ func (qb *QuantumBot) calculatePredictionAccuracy() float64 {
 	return qb.performanceMetrics.AIAccuracy
 }
 
-func (qb *QuantumBot) getRecentPerformanceData() []TrainingExample {
+func (qb *QuantumBot) getRecentPerformanceData() []AITrainingExample {
 	// Return recent training examples for AI learning
-	return make([]TrainingExample, 0)
+	return make([]AITrainingExample, 0)
 }
 
 func (qb *QuantumBot) updateSuccessPatterns() {
