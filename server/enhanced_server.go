@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"pi/util"
 	"strconv"
 	"time"
@@ -14,7 +13,6 @@ import (
 	"github.com/stellar/go/keypair"
 )
 
-// Enhanced withdraw request with additional options
 type EnhancedWithdrawRequest struct {
 	SeedPhrase        string                 `json:"seed_phrase"`
 	LockedBalanceID   string                 `json:"locked_balance_id"`
@@ -26,10 +24,10 @@ type EnhancedWithdrawRequest struct {
 
 type TurboWithdrawRequest struct {
 	EnhancedWithdrawRequest
-	PreExecutionTime int    `json:"pre_execution_time_ms,omitempty"` // milliseconds before execution
+	PreExecutionTime int    `json:"pre_execution_time_ms,omitempty"`
 	BurstSize        int    `json:"burst_size,omitempty"`
 	MaxRetries       int    `json:"max_retries,omitempty"`
-	FeeStrategy      string `json:"fee_strategy,omitempty"` // "aggressive", "ultra", "emergency"
+	FeeStrategy      string `json:"fee_strategy,omitempty"`
 }
 
 type PerformanceResponse struct {
@@ -38,7 +36,6 @@ type PerformanceResponse struct {
 	Stats   map[string]interface{} `json:"stats"`
 }
 
-// Enhanced withdraw handler with superior performance
 func (s *Server) EnhancedWithdraw(ctx *gin.Context) {
 	conn, err := upgrader.Upgrade(ctx.Writer, ctx.Request, nil)
 	if err != nil {
@@ -68,7 +65,6 @@ func (s *Server) EnhancedWithdraw(ctx *gin.Context) {
 		return
 	}
 
-	// Configure strategy if provided
 	if req.Strategy != nil {
 		if err := s.enhancedWallet.ConfigureStrategy(req.Strategy); err != nil {
 			s.sendErrorResponse(conn, fmt.Sprintf("Strategy configuration failed: %v", err))
@@ -76,11 +72,9 @@ func (s *Server) EnhancedWithdraw(ctx *gin.Context) {
 		}
 	}
 
-	// Enhanced execution with concurrent claim and transfer
 	s.executeEnhancedWithdraw(ctx, conn, kp, req)
 }
 
-// Turbo withdraw - maximum performance mode
 func (s *Server) TurboWithdraw(ctx *gin.Context) {
 	conn, err := upgrader.Upgrade(ctx.Writer, ctx.Request, nil)
 	if err != nil {
@@ -110,7 +104,6 @@ func (s *Server) TurboWithdraw(ctx *gin.Context) {
 		return
 	}
 
-	// Configure turbo strategy
 	turboStrategy := map[string]interface{}{
 		"aggressive_mode": true,
 		"burst_size":      100,
@@ -118,7 +111,6 @@ func (s *Server) TurboWithdraw(ctx *gin.Context) {
 		"fee_multiplier":  5.0,
 	}
 
-	// Override with user preferences
 	if req.BurstSize > 0 {
 		turboStrategy["burst_size"] = req.BurstSize
 	}
@@ -137,7 +129,6 @@ func (s *Server) TurboWithdraw(ctx *gin.Context) {
 		Success: true,
 	})
 
-	// Execute with turbo settings
 	s.executeEnhancedWithdraw(ctx, conn, kp, req.EnhancedWithdrawRequest)
 }
 
@@ -147,17 +138,14 @@ func (s *Server) executeEnhancedWithdraw(
 	kp *keypair.Full,
 	req EnhancedWithdrawRequest,
 ) {
-	// First, attempt to withdraw any available balance immediately
 	s.withdrawAvailableBalance(conn, kp, req.WithdrawalAddress)
 
-	// Get claimable balance details
 	balance, err := s.enhancedWallet.GetClaimableBalance(req.LockedBalanceID)
 	if err != nil {
 		s.sendErrorResponse(conn, fmt.Sprintf("Failed to get balance: %v", err))
 		return
 	}
 
-	// Find claimable time
 	var claimableAt time.Time
 	var found bool
 	
@@ -182,10 +170,8 @@ func (s *Server) executeEnhancedWithdraw(
 		Success: true,
 	})
 
-	// Send countdown updates
 	go s.sendCountdownUpdates(conn, claimableAt)
 
-	// Execute concurrent operations with enhanced wallet
 	err = s.enhancedWallet.ExecuteConcurrentClaimAndTransfer(
 		ctx,
 		kp,
@@ -221,9 +207,8 @@ func (s *Server) withdrawAvailableBalance(conn *websocket.Conn, kp *keypair.Full
 		return
 	}
 
-	// Convert to float to check if there's a meaningful amount
 	balance, err := strconv.ParseFloat(availableBalance, 64)
-	if err != nil || balance < 0.01 { // Less than 0.01 PI
+	if err != nil || balance < 0.01 {
 		s.sendResponse(conn, WithdrawResponse{
 			Action:  "no_available_balance",
 			Message: fmt.Sprintf("No significant available balance to withdraw: %s PI", availableBalance),
@@ -250,7 +235,7 @@ func (s *Server) withdrawAvailableBalance(conn *websocket.Conn, kp *keypair.Full
 }
 
 func (s *Server) sendCountdownUpdates(conn *websocket.Conn, targetTime time.Time) {
-	ticker := time.NewTicker(time.Second * 10) // Update every 10 seconds
+	ticker := time.NewTicker(time.Second * 10)
 	defer ticker.Stop()
 
 	for {
@@ -267,7 +252,6 @@ func (s *Server) sendCountdownUpdates(conn *websocket.Conn, targetTime time.Time
 				Success: true,
 			})
 
-			// Stop sending updates when close to execution time
 			if remaining < time.Second*30 {
 				return
 			}
@@ -275,7 +259,6 @@ func (s *Server) sendCountdownUpdates(conn *websocket.Conn, targetTime time.Time
 	}
 }
 
-// Performance metrics endpoint
 func (s *Server) GetPerformanceMetrics(ctx *gin.Context) {
 	stats := s.enhancedWallet.metrics.GetStats()
 	
@@ -286,7 +269,6 @@ func (s *Server) GetPerformanceMetrics(ctx *gin.Context) {
 	})
 }
 
-// Strategy configuration endpoint
 func (s *Server) ConfigureStrategy(ctx *gin.Context) {
 	var config map[string]interface{}
 	

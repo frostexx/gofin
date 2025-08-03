@@ -4,11 +4,8 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"math/rand"
 	"os"
-	"pi/util"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -17,9 +14,7 @@ import (
 	"github.com/stellar/go/clients/horizonclient"
 	hClient "github.com/stellar/go/clients/horizonclient"
 	"github.com/stellar/go/keypair"
-	"github.com/stellar/go/protocols/horizon"
 	"github.com/stellar/go/txnbuild"
-	"github.com/stellar/go/xdr"
 )
 
 // Enhanced Wallet with superior performance capabilities
@@ -155,10 +150,10 @@ func NewEnhancedWallet() *EnhancedWallet {
 	
 	ew := &EnhancedWallet{
 		Wallet:          base,
-		connectionPool:  newConnectionPool(100), // Increased to 100 connections
+		connectionPool:  newConnectionPool(100),
 		feeOracle:      newDynamicFeeOracle(),
 		timingSync:     newNetworkTimingSync(),
-		concurrencyMgr: newConcurrencyManager(200), // Increased concurrency
+		concurrencyMgr: newConcurrencyManager(200),
 		floodProtection: newAntiFloodSystem(),
 		operationCache: newOperationCache(),
 		metrics:        newPerformanceMetrics(),
@@ -179,13 +174,11 @@ func newConnectionPool(maxClients int) *ConnectionPool {
 		maxClients: maxClients,
 	}
 	
-	// Initialize connection pool with staggered creation
+	// Initialize connection pool
 	for i := 0; i < maxClients; i++ {
 		client := &hClient.Client{
 			HorizonURL: os.Getenv("NET_URL"),
 		}
-		// Configure for high performance
-		client.HTTP.Timeout = time.Second * 30
 		pool.clients[i] = client
 	}
 	
@@ -211,10 +204,8 @@ func (dfo *DynamicFeeOracle) updateCompetitorFees(fees []int64) {
 	dfo.mu.Lock()
 	defer dfo.mu.Unlock()
 	
-	// Add to competitor fees
 	dfo.competitorFees = append(dfo.competitorFees, fees...)
 	
-	// Keep only recent entries (last 1000)
 	if len(dfo.competitorFees) > 1000 {
 		dfo.competitorFees = dfo.competitorFees[len(dfo.competitorFees)-1000:]
 	}
@@ -226,7 +217,6 @@ func (dfo *DynamicFeeOracle) calculateOptimalFee(priority PriorityLevel) int64 {
 	dfo.mu.RLock()
 	defer dfo.mu.RUnlock()
 	
-	// Base calculation
 	fee := dfo.baseFee
 	
 	// Adaptive learning from history
@@ -242,7 +232,6 @@ func (dfo *DynamicFeeOracle) calculateOptimalFee(priority PriorityLevel) int64 {
 			sort.Slice(successfulFees, func(i, j int) bool {
 				return successfulFees[i] < successfulFees[j]
 			})
-			// Use 75th percentile of successful fees
 			percentile75 := successfulFees[int(float64(len(successfulFees))*0.75)]
 			if percentile75 > fee {
 				fee = percentile75
@@ -250,7 +239,6 @@ func (dfo *DynamicFeeOracle) calculateOptimalFee(priority PriorityLevel) int64 {
 		}
 	}
 	
-	// Network congestion multiplier
 	congestionMultiplier := 1.0 + dfo.networkCongestion
 	
 	// Competitor analysis
@@ -259,11 +247,9 @@ func (dfo *DynamicFeeOracle) calculateOptimalFee(priority PriorityLevel) int64 {
 			return dfo.competitorFees[i] > dfo.competitorFees[j]
 		})
 		
-		// Beat top competitor fees with buffer
 		if len(dfo.competitorFees) >= 3 {
-			// Use 95th percentile of competitor fees
 			percentile95 := dfo.competitorFees[int(float64(len(dfo.competitorFees))*0.05)]
-			competitorBuffer := int64(float64(percentile95) * 1.5) // 50% buffer
+			competitorBuffer := int64(float64(percentile95) * 1.5)
 			if competitorBuffer > fee {
 				fee = competitorBuffer
 			}
@@ -282,17 +268,17 @@ func (dfo *DynamicFeeOracle) calculateOptimalFee(priority PriorityLevel) int64 {
 		fee = int64(float64(fee) * congestionMultiplier)
 	}
 	
-	// Ensure minimum competitive fee (based on your competitor data)
-	minCompetitiveFee := int64(3200000) // 0.32 PI (your competitor's fee)
+	// Ensure minimum competitive fee
+	minCompetitiveFee := int64(3200000) // 0.32 PI
 	if fee < minCompetitiveFee {
 		fee = minCompetitiveFee
 	}
 	
-	// For ultra-competitive scenarios, use emergency fee
+	// For ultra-competitive scenarios
 	if priority >= UltraPriority {
-		emergencyFee := int64(9400000) // 0.94 PI (highest competitor fee you mentioned)
+		emergencyFee := int64(9400000) // 0.94 PI
 		if fee < emergencyFee {
-			fee = emergencyFee * 2 // Double the highest known competitor fee
+			fee = emergencyFee * 2
 		}
 	}
 	
@@ -311,7 +297,6 @@ func (dfo *DynamicFeeOracle) recordFeeResult(fee int64, success bool) {
 	
 	dfo.feeHistory = append(dfo.feeHistory, entry)
 	
-	// Keep only recent entries
 	if len(dfo.feeHistory) > 10000 {
 		dfo.feeHistory = dfo.feeHistory[1000:]
 	}
@@ -319,8 +304,8 @@ func (dfo *DynamicFeeOracle) recordFeeResult(fee int64, success bool) {
 
 func newNetworkTimingSync() *NetworkTimingSync {
 	return &NetworkTimingSync{
-		syncInterval:    time.Second * 10, // More frequent sync
-		precisionBuffer: time.Millisecond * 25, // Reduced buffer for more aggressive timing
+		syncInterval:    time.Second * 10,
+		precisionBuffer: time.Millisecond * 25,
 		ntpServers: []string{
 			"time.google.com",
 			"time.cloudflare.com",
@@ -333,7 +318,6 @@ func (nts *NetworkTimingSync) syncWithNetwork(client *hClient.Client) error {
 	var totalLatency time.Duration
 	var samples int
 	
-	// Take multiple samples for better accuracy
 	for i := 0; i < 5; i++ {
 		start := time.Now()
 		_, err := client.Ledgers(horizonclient.LedgerRequest{Limit: 1})
@@ -354,10 +338,8 @@ func (nts *NetworkTimingSync) syncWithNetwork(client *hClient.Client) error {
 }
 
 func (nts *NetworkTimingSync) getOptimalExecutionTime(targetTime time.Time) time.Time {
-	// Account for network latency and add precision buffer
 	optimalTime := targetTime.Add(-nts.networkLatency).Add(-nts.precisionBuffer)
 	
-	// Ensure we don't execute too early
 	now := time.Now()
 	if optimalTime.Before(now) {
 		optimalTime = now.Add(time.Millisecond * 10)
@@ -390,14 +372,14 @@ func (cm *ConcurrencyManager) getActiveOperations() int64 {
 
 func newAntiFloodSystem() *AntiFloodSystem {
 	return &AntiFloodSystem{
-		connectionBurst:   50, // Increased burst size
-		burstInterval:     time.Millisecond * 50, // Faster bursts
+		connectionBurst:   50,
+		burstInterval:     time.Millisecond * 50,
 		backoffStrategy:   AggressiveBackoff,
 		counterAttackMode: true,
 		floodDetection: &FloodDetector{
 			requestCounts:  make(map[string]int),
 			timeWindows:    make(map[string]time.Time),
-			threshold:      2000, // Higher threshold for detection
+			threshold:      2000,
 			windowDuration: time.Second * 5,
 		},
 	}
@@ -422,7 +404,7 @@ func newExecutionStrategy() *ExecutionStrategy {
 	return &ExecutionStrategy{
 		AggressiveMode:   true,
 		BurstSize:        100,
-		MaxRetries:       500, // Increased retries
+		MaxRetries:       500,
 		FeeMultiplier:    2.0,
 		PreExecutionTime: time.Millisecond * 200,
 	}
@@ -438,26 +420,21 @@ func (ew *EnhancedWallet) ExecuteConcurrentClaimAndTransfer(
 	executionTime time.Time,
 ) error {
 	
-	// Pre-synchronize network timing
 	if err := ew.timingSync.syncWithNetwork(ew.connectionPool.getClient()); err != nil {
 		return fmt.Errorf("timing sync failed: %w", err)
 	}
 	
-	// Calculate optimal execution time
 	optimalTime := ew.timingSync.getOptimalExecutionTime(executionTime)
 	
-	// Pre-compute transactions for maximum speed
 	claimTx, transferTx, err := ew.precomputeTransactions(kp, balanceID, transferAddress, amount)
 	if err != nil {
 		return fmt.Errorf("precomputation failed: %w", err)
 	}
 	
-	// Launch counter-flood attack if enabled
 	if ew.floodProtection.counterAttackMode {
 		go ew.launchCounterFloodAttack(ctx, executionTime)
 	}
 	
-	// Wait until optimal execution time
 	waitDuration := time.Until(optimalTime)
 	if waitDuration > 0 {
 		timer := time.NewTimer(waitDuration)
@@ -465,14 +442,12 @@ func (ew *EnhancedWallet) ExecuteConcurrentClaimAndTransfer(
 		
 		select {
 		case <-timer.C:
-			// Execute both operations concurrently
 			return ew.executeConcurrentOperations(ctx, claimTx, transferTx, kp)
 		case <-ctx.Done():
 			return ctx.Err()
 		}
 	}
 	
-	// Execute immediately if time has passed
 	return ew.executeConcurrentOperations(ctx, claimTx, transferTx, kp)
 }
 
@@ -483,18 +458,17 @@ func (ew *EnhancedWallet) precomputeTransactions(
 	amount string,
 ) (*txnbuild.Transaction, *txnbuild.Transaction, error) {
 	
-	// Get account for sequence number
 	account, err := ew.GetAccount(kp)
 	if err != nil {
 		return nil, nil, err
 	}
 	
+	// Fix: Use Sequence instead of SequenceNumber
 	sourceAccount := &txnbuild.SimpleAccount{
 		AccountID: kp.Address(),
-		Sequence:  account.SequenceNumber,
+		Sequence:  account.Sequence,
 	}
 	
-	// Pre-compute claim transaction
 	claimOp := &txnbuild.ClaimClaimableBalance{
 		BalanceID: balanceID,
 	}
@@ -513,10 +487,10 @@ func (ew *EnhancedWallet) precomputeTransactions(
 		return nil, nil, err
 	}
 	
-	// Pre-compute transfer transaction with incremented sequence
+	// Fix: Use Sequence instead of SequenceNumber
 	transferSourceAccount := &txnbuild.SimpleAccount{
 		AccountID: kp.Address(),
-		Sequence:  account.SequenceNumber + 1,
+		Sequence:  account.Sequence + 1,
 	}
 	
 	transferOp := &txnbuild.Payment{
@@ -552,14 +526,12 @@ func (ew *EnhancedWallet) executeConcurrentOperations(
 	var wg sync.WaitGroup
 	var claimErr, transferErr error
 	
-	// Execute claim operation with burst strategy
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		claimErr = ew.executeWithBurstStrategy(ctx, claimTx, kp, "claim")
 	}()
 	
-	// Execute transfer operation (independent of claim result) with burst strategy
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -568,11 +540,9 @@ func (ew *EnhancedWallet) executeConcurrentOperations(
 	
 	wg.Wait()
 	
-	// Record results
 	ew.feeOracle.recordFeeResult(claimTx.BaseFee(), claimErr == nil)
 	ew.feeOracle.recordFeeResult(transferTx.BaseFee(), transferErr == nil)
 	
-	// Return combined results
 	if claimErr != nil && transferErr != nil {
 		ew.metrics.recordFailure("both")
 		return fmt.Errorf("both operations failed - claim: %v, transfer: %v", claimErr, transferErr)
@@ -600,13 +570,11 @@ func (ew *EnhancedWallet) executeWithBurstStrategy(
 	
 	var lastErr error
 	
-	// Execute in bursts for maximum probability of success
 	for burst := 0; burst < maxAttempts/burstSize; burst++ {
 		var burstWg sync.WaitGroup
 		var successChan = make(chan struct{}, 1)
 		var burstErrors = make([]error, burstSize)
 		
-		// Launch burst of concurrent attempts
 		for i := 0; i < burstSize; i++ {
 			burstWg.Add(1)
 			go func(attemptIndex int) {
@@ -614,7 +582,6 @@ func (ew *EnhancedWallet) executeWithBurstStrategy(
 				
 				select {
 				case <-successChan:
-					// Another goroutine succeeded, exit early
 					return
 				default:
 				}
@@ -622,34 +589,27 @@ func (ew *EnhancedWallet) executeWithBurstStrategy(
 				ew.concurrencyMgr.acquire()
 				defer ew.concurrencyMgr.release()
 				
-				// Use different client for each attempt
 				client := ew.connectionPool.getClient()
 				
-				// Sign transaction fresh each time
 				signedTx, err := tx.Sign(ew.networkPassphrase, kp)
 				if err != nil {
 					burstErrors[attemptIndex] = err
 					return
 				}
 				
-				// Submit transaction
 				_, err = client.SubmitTransaction(signedTx)
 				if err != nil {
 					burstErrors[attemptIndex] = err
 					return
 				}
 				
-				// Signal success
 				select {
 				case successChan <- struct{}{}:
-					// Successfully signaled
 				default:
-					// Channel already has success signal
 				}
 			}(i)
 		}
 		
-		// Wait for burst completion or success
 		done := make(chan struct{})
 		go func() {
 			burstWg.Wait()
@@ -658,11 +618,9 @@ func (ew *EnhancedWallet) executeWithBurstStrategy(
 		
 		select {
 		case <-successChan:
-			// Success! Record and return
 			ew.metrics.recordSuccess(operation)
 			return nil
 		case <-done:
-			// All attempts in burst failed
 			for _, err := range burstErrors {
 				if err != nil {
 					lastErr = err
@@ -673,7 +631,6 @@ func (ew *EnhancedWallet) executeWithBurstStrategy(
 			return ctx.Err()
 		}
 		
-		// Brief pause between bursts (adaptive backoff)
 		if burst < maxAttempts/burstSize-1 {
 			backoffDuration := ew.calculateAggressiveBackoff(burst, lastErr)
 			select {
@@ -694,25 +651,19 @@ func (ew *EnhancedWallet) calculateAggressiveBackoff(attempt int, err error) tim
 		return time.Millisecond * 10
 	}
 	
-	base := time.Millisecond * 5 // Very aggressive base
+	base := time.Millisecond * 5
 	
-	// Error-specific backoff
 	errorString := strings.ToLower(err.Error())
 	switch {
 	case strings.Contains(errorString, "rate") || strings.Contains(errorString, "limit"):
-		// Rate limiting - very short backoff
 		return base
 	case strings.Contains(errorString, "sequence"):
-		// Sequence issues - immediate retry
 		return time.Millisecond
 	case strings.Contains(errorString, "insufficient"):
-		// Balance issues - short backoff
 		return base * 2
 	case strings.Contains(errorString, "timeout"):
-		// Network issues - medium backoff
 		return base * 3
 	default:
-		// Unknown error - short exponential backoff
 		backoff := base * time.Duration(math.Pow(1.2, float64(attempt)))
 		if backoff > time.Second {
 			backoff = time.Second
@@ -722,12 +673,11 @@ func (ew *EnhancedWallet) calculateAggressiveBackoff(attempt int, err error) tim
 }
 
 func (ew *EnhancedWallet) launchCounterFloodAttack(ctx context.Context, targetTime time.Time) {
-	// Launch coordinated burst attack 500ms before target time
 	burstTime := targetTime.Add(-time.Millisecond * 500)
 	
 	waitDuration := time.Until(burstTime)
 	if waitDuration <= 0 {
-		return // Too late
+		return
 	}
 	
 	timer := time.NewTimer(waitDuration)
@@ -735,7 +685,6 @@ func (ew *EnhancedWallet) launchCounterFloodAttack(ctx context.Context, targetTi
 	
 	select {
 	case <-timer.C:
-		// Launch sustained connection bursts to reserve network capacity
 		var wg sync.WaitGroup
 		
 		for wave := 0; wave < 5; wave++ {
@@ -744,12 +693,10 @@ func (ew *EnhancedWallet) launchCounterFloodAttack(ctx context.Context, targetTi
 				go func() {
 					defer wg.Done()
 					client := ew.connectionPool.getClient()
-					// Keep connection warm with lightweight request
 					client.Ledgers(horizonclient.LedgerRequest{Limit: 1})
 				}()
 			}
 			
-			// Small delay between waves
 			time.Sleep(ew.floodProtection.burstInterval)
 		}
 		
@@ -759,7 +706,7 @@ func (ew *EnhancedWallet) launchCounterFloodAttack(ctx context.Context, targetTi
 	}
 }
 
-// Background processes for continuous optimization
+// Background processes
 func (ew *EnhancedWallet) backgroundNetworkSync() {
 	ticker := time.NewTicker(ew.timingSync.syncInterval)
 	defer ticker.Stop()
@@ -779,7 +726,7 @@ func (ew *EnhancedWallet) backgroundFeeAnalysis() {
 	for {
 		select {
 		case <-ticker.C:
-			ew.analyzePastTransactionsForFeeOptimization()
+			// Fee optimization logic here
 		}
 	}
 }
@@ -794,11 +741,6 @@ func (ew *EnhancedWallet) backgroundCacheCleanup() {
 			ew.operationCache.cleanup()
 		}
 	}
-}
-
-func (ew *EnhancedWallet) analyzePastTransactionsForFeeOptimization() {
-	// Implementation for analyzing network transactions to optimize fee strategy
-	// This would analyze recent transactions to understand fee patterns
 }
 
 func (oc *OperationCache) cleanup() {
@@ -854,7 +796,6 @@ func (pm *PerformanceMetrics) GetStats() map[string]interface{} {
 	}
 }
 
-// Configuration methods
 func (ew *EnhancedWallet) ConfigureStrategy(config map[string]interface{}) error {
 	ew.strategy.mu.Lock()
 	defer ew.strategy.mu.Unlock()
