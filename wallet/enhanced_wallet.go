@@ -631,6 +631,54 @@ type FeeOptimizationStats struct {
 	lastOptimization    time.Time
 }
 
+// Missing type definitions
+type TimingPattern struct {
+    OptimalWindow time.Duration
+    Success       float64
+    Confidence    float64
+}
+
+type EncryptionAlgorithm int
+const (
+    EncryptionAES EncryptionAlgorithm = iota
+    EncryptionChaCha20
+    EncryptionBlowfish
+)
+
+type KeyDerivationFunction int
+const (
+    DerivationPBKDF2 KeyDerivationFunction = iota
+    DerivationScrypt
+    DerivationArgon2
+)
+
+type LoadBalancingStrategy int
+const (
+    BalancerRoundRobin LoadBalancingStrategy = iota
+    BalancerWeighted
+    BalancerAdaptive
+)
+
+type CircuitState int
+const (
+    CircuitClosed CircuitState = iota
+    CircuitOpen
+    CircuitHalfOpen
+)
+
+// Supporting types
+type LockedBalance struct {
+    ID     string
+    Amount string
+    Asset  string
+}
+
+type Transaction struct {
+    Hash      string
+    Amount    string
+    Timestamp string
+}
+
 // ENHANCED WALLET INITIALIZATION
 func NewEnhancedWallet(baseWallet *Wallet) *EnhancedWallet {
 	ew := &EnhancedWallet{

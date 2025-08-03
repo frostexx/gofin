@@ -1,12 +1,57 @@
 package wallet
 
 import (
-	"fmt"
-	"strconv"
-
-	"github.com/stellar/go/keypair"
-	"github.com/stellar/go/txnbuild"
+    "sync"
+    "github.com/stellar/go/clients/horizonclient"
+    "github.com/stellar/go/protocols/horizon"
+    "github.com/stellar/go/keypair"
 )
+
+// Base Wallet struct definition
+type Wallet struct {
+    client            *horizonclient.Client
+    networkPassphrase string
+    baseReserve       float64
+    mutex             sync.RWMutex
+}
+
+// Constructor for base wallet
+func New() *Wallet {
+    return &Wallet{
+        client:            horizonclient.DefaultTestNetClient,
+        networkPassphrase: "Test SDF Network ; September 2015",
+        baseReserve:       0.5,
+    }
+}
+
+// Core wallet methods (GetAccount, GetBalance, etc.)
+func (w *Wallet) GetAccount(kp *keypair.Full) (horizon.Account, error) {
+    // Implementation needed
+}
+
+func (w *Wallet) GetAvailableBalance(kp *keypair.Full) (string, error) {
+    // Implementation needed  
+}
+
+func (w *Wallet) GetLockedBalances(kp *keypair.Full) ([]LockedBalance, error) {
+    // Implementation needed
+}
+
+func (w *Wallet) GetTransactions(kp *keypair.Full, limit int) ([]Transaction, error) {
+    // Implementation needed
+}
+
+func (w *Wallet) Login(seedPhrase string) (*keypair.Full, error) {
+    // Implementation needed
+}
+
+func (w *Wallet) ClaimAndWithdraw(kp *keypair.Full, amount float64, balanceID, address string) (string, error) {
+    // Implementation needed
+}
+
+func (w *Wallet) GetBaseReserve() {
+    // Implementation needed
+}
 
 // Enhanced wallet methods with dynamic fee support
 
