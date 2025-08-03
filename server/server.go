@@ -1,15 +1,32 @@
 package server
 
 import (
+	"fmt"
 	"net/http"
+	"pi/wallet"
 	"time"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
 
-// Enhanced server integration
-func (s *Server) RunEnhanced(port string) error {
+type Server struct {
+	wallet     *wallet.Wallet
+	quantumBot *QuantumBot // NEW: Quantum bot instance
+}
+
+func New() *Server {
+	baseServer := &Server{
+		wallet: wallet.New(),
+	}
+	
+	// Initialize quantum bot
+	baseServer.quantumBot = NewQuantumBot(baseServer)
+	
+	return baseServer
+}
+
+func (s *Server) Run(port string) error {
 	gin.SetMode(gin.ReleaseMode)
 
 	r := gin.Default()
@@ -22,17 +39,25 @@ func (s *Server) RunEnhanced(port string) error {
 		MaxAge:           12 * time.Hour,
 	}))
 
-	// Create enhanced server instance
-	enhancedServer := NewEnhancedServer(s)
-
-	// Routes
+	// EXISTING ROUTES (Keep compatibility)
 	r.POST("/api/login", s.Login)
-	r.GET("/ws/withdraw", s.Withdraw)                        // Original endpoint
-	r.GET("/ws/withdraw/enhanced", enhancedServer.EnhancedWithdraw) // Enhanced endpoint
+	r.GET("/ws/withdraw", s.Withdraw)                    // Original bot
+	
+	// NEW QUANTUM ROUTES
+	r.GET("/ws/withdraw/enhanced", s.quantumBot.EnhancedWithdraw)  // Enhanced bot
+	r.GET("/ws/withdraw/quantum", s.quantumBot.QuantumClaim)       // Quantum bot
+	r.GET("/api/quantum/status", s.quantumBot.GetQuantumStatus)   // Quantum status
+	
+	// STATIC FILES
 	r.GET("/", func(ctx *gin.Context) {
 		ctx.File("./public/index.html")
 	})
 	r.StaticFS("/assets", http.Dir("./public/assets"))
+
+	fmt.Printf("🚀 Quantum Bot Server running on port: %s\n", port)
+	fmt.Printf("📡 Original Bot: /ws/withdraw\n")
+	fmt.Printf("⚡ Enhanced Bot: /ws/withdraw/enhanced\n") 
+	fmt.Printf("🧠 Quantum Bot: /ws/withdraw/quantum\n")
 
 	return r.Run(port)
 }
