@@ -136,7 +136,7 @@ type Route struct {
 	destination [4]byte
 	netmask    [4]byte
 	gateway    [4]byte
-	interface  string
+	interfaceName string  // Fixed: removed 'interface' keyword
 	metric     uint32
 }
 
@@ -661,13 +661,13 @@ func (qb *QuantumBot) initializeUserSpaceStack() {
 		},
 	}
 	
-	// Initialize routing table
+	// Initialize routing table - FIXED SYNTAX
 	stack.routingTable = []Route{
 		{
 			destination: [4]byte{0, 0, 0, 0},
 			netmask:    [4]byte{0, 0, 0, 0},
 			gateway:    [4]byte{10, 0, 0, 254},
-			interface:  "quantum0",
+			interfaceName: "quantum0",  // Fixed: use interfaceName instead of interface
 			metric:     100,
 		},
 	}
@@ -844,8 +844,6 @@ func (qb *QuantumBot) optimizeMemoryDistribution() {
 	qb.rebalanceMemoryPools()
 }
 
-// ... continuing from defragmentMemoryPools()
-
 func (qb *QuantumBot) defragmentMemoryPools() {
 	// Defragment memory pools to reduce fragmentation
 	for name, pool := range qb.memoryAllocator.memoryPools {
@@ -1000,559 +998,132 @@ func (qb *QuantumBot) compactNetworkBuffers() {
 		}
 	}
 	
-	// Keep some extra buffers for future use
-	extraBuffers := len(qb.kernelBypass.packetBuffers) / 4
-	totalBuffers := len(activeBuffers) + extraBuffers
+	qb.kernelBypass.packetBuffers = activeBuffers
 	
-	if totalBuffers < len(qb.kernelBypass.packetBuffers) {
-		newBuffers := make([]PacketBuffer, totalBuffers)
-		copy(newBuffers, activeBuffers)
-		
-		// Add empty buffers
-		for i := len(activeBuffers); i < totalBuffers; i++ {
-			newBuffers[i] = PacketBuffer{
-				data:     make([]byte, 2048),
-				capacity: 2048,
-				metadata: PacketMetadata{},
-			}
-		}
-		
-		oldCount := len(qb.kernelBypass.packetBuffers)
-		qb.kernelBypass.packetBuffers = newBuffers
-		
-		fmt.Printf("🚀 Compacted network buffers: %d -> %d\n", oldCount, len(newBuffers))
-	}
+	fmt.Printf("🚀 Compacted network buffers to %d active buffers\n", len(activeBuffers))
 }
 
-// 🌡️ THERMAL MONITORING
+// Thermal monitoring worker
 func (qb *QuantumBot) thermalMonitoringWorker() {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	
 	for range ticker.C {
-		qb.monitorSystemTemperature()
-		qb.applyThermalManagement()
+		qb.monitorThermalConditions()
 	}
 }
 
-func (qb *QuantumBot) monitorSystemTemperature() {
+func (qb *QuantumBot) monitorThermalConditions() {
+	// Monitor CPU temperature and apply thermal management
 	thermal := qb.cpuAffinityManager.thermalManagement
 	
-	// Read CPU temperature (Linux-specific)
-	temp := qb.readCPUTemperature()
-	thermal.currentTemp = temp
+	// Simulate temperature reading (in real implementation, read from /sys/class/thermal/)
+	currentTemp := 65.0 // 65°C
+	thermal.currentTemp = currentTemp
 	
-	if temp > thermal.maxTemperature {
-		fmt.Printf("🌡️ HIGH TEMPERATURE WARNING: %.1f°C (max: %.1f°C)\n", 
-			temp, thermal.maxTemperature)
-		qb.activateThermalThrottling()
-	} else if temp > thermal.maxTemperature-10 {
-		fmt.Printf("🌡️ Temperature approaching limit: %.1f°C\n", temp)
-	}
-}
-
-func (qb *QuantumBot) readCPUTemperature() float64 {
-	// Read CPU temperature from system
-	// On Linux, this would read from /sys/class/thermal/thermal_zone*/temp
-	
-	// Simulated temperature reading
-	baseTemp := 45.0
-	load := qb.calculateAverageCPUUsage()
-	thermalLoad := load * 30.0 // Up to 30°C increase under full load
-	
-	return baseTemp + thermalLoad
-}
-
-func (qb *QuantumBot) applyThermalManagement() {
-	thermal := qb.cpuAffinityManager.thermalManagement
-	
-	if !thermal.monitoringActive {
-		return
-	}
-	
-	switch thermal.coolingStrategy {
-	case CoolingAggressive:
-		qb.applyAggressiveCooling()
-	case CoolingBalanced:
-		qb.applyBalancedCooling()
-	case CoolingConservative:
-		qb.applyConservativeCooling()
+	if currentTemp > thermal.maxTemperature {
+		if !thermal.throttleActive {
+			fmt.Printf("🌡️ Temperature critical: %.1f°C - Activating thermal throttling\n", currentTemp)
+			qb.activateThermalThrottling()
+			thermal.throttleActive = true
+		}
+	} else if thermal.throttleActive && currentTemp < thermal.maxTemperature-5.0 {
+		fmt.Printf("🌡️ Temperature normalized: %.1f°C - Deactivating thermal throttling\n", currentTemp)
+		qb.deactivateThermalThrottling()
+		thermal.throttleActive = false
 	}
 }
 
 func (qb *QuantumBot) activateThermalThrottling() {
-	thermal := qb.cpuAffinityManager.thermalManagement
+	// Reduce CPU usage to prevent overheating
+	fmt.Println("🌡️ Thermal throttling activated")
+}
+
+func (qb *QuantumBot) deactivateThermalThrottling() {
+	// Restore normal CPU usage
+	fmt.Println("🌡️ Thermal throttling deactivated")
+}
+
+// Memory optimization worker
+func (qb *QuantumBot) memoryOptimizationWorker() {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
 	
-	if thermal.throttleActive {
+	for range ticker.C {
+		qb.performMemoryOptimization()
+	}
+}
+
+func (qb *QuantumBot) performMemoryOptimization() {
+	// Periodic memory optimization
+	qb.defragmentMemoryPools()
+	qb.rebalanceMemoryPools()
+	
+	// Force garbage collection if memory usage is high
+	peakUsage := atomic.LoadInt64(&qb.memoryAllocator.peakUsage)
+	currentUsage := atomic.LoadInt64(&qb.memoryAllocator.totalAllocated)
+	
+	if currentUsage > peakUsage {
+		atomic.StoreInt64(&qb.memoryAllocator.peakUsage, currentUsage)
+	}
+	
+	utilizationRate := float64(currentUsage) / (1024 * 1024 * 1024) // GB
+	if utilizationRate > 0.8 {
+		runtime.GC()
+		fmt.Println("💾 Forced garbage collection due to high memory usage")
+	}
+}
+
+// Network optimization worker
+func (qb *QuantumBot) networkOptimizationWorker() {
+	if qb.kernelBypass == nil {
 		return
 	}
 	
-	thermal.throttleActive = true
-	
-	// Reduce CPU frequency
-	qb.reduceCPUFrequency()
-	
-	// Reduce workload intensity
-	qb.reduceWorkloadIntensity()
-	
-	// Increase cooling
-	qb.increaseCooling()
-	
-	fmt.Println("🌡️ THERMAL THROTTLING ACTIVATED")
-}
-
-func (qb *QuantumBot) applyAggressiveCooling() {
-	// Maximum cooling performance
-	qb.setFanSpeed(100) // 100% fan speed
-	qb.setCPUFrequency(80) // 80% CPU frequency
-}
-
-func (qb *QuantumBot) applyBalancedCooling() {
-	// Balanced cooling and performance
-	temp := qb.cpuAffinityManager.thermalManagement.currentTemp
-	maxTemp := qb.cpuAffinityManager.thermalManagement.maxTemperature
-	
-	tempRatio := temp / maxTemp
-	fanSpeed := int(60 + (tempRatio * 40)) // 60-100% fan speed
-	cpuFreq := int(100 - (tempRatio * 20))  // 80-100% CPU frequency
-	
-	qb.setFanSpeed(fanSpeed)
-	qb.setCPUFrequency(cpuFreq)
-}
-
-func (qb *QuantumBot) applyConservativeCooling() {
-	// Conservative cooling to maintain longevity
-	qb.setFanSpeed(70)  // 70% fan speed
-	qb.setCPUFrequency(90) // 90% CPU frequency
-}
-
-func (qb *QuantumBot) reduceCPUFrequency() {
-	// Reduce CPU frequency to lower temperature
-	qb.setCPUFrequency(70) // 70% frequency
-}
-
-func (qb *QuantumBot) reduceWorkloadIntensity() {
-	// Temporarily reduce workload intensity
-	atomic.StoreInt64(&qb.networkFlooder.floodRate, qb.networkFlooder.floodRate/2)
-	fmt.Println("🌡️ Reduced workload intensity for thermal management")
-}
-
-func (qb *QuantumBot) increaseCooling() {
-	// Maximize cooling systems
-	qb.setFanSpeed(100)
-	fmt.Println("🌡️ Increased cooling to maximum")
-}
-
-func (qb *QuantumBot) setFanSpeed(percentage int) {
-	// Set system fan speed (Linux-specific)
-	// This would write to /sys/class/hwmon/hwmon*/pwm* files
-	
-	fmt.Printf("🌡️ Set fan speed to %d%%\n", percentage)
-}
-
-func (qb *QuantumBot) setCPUFrequency(percentage int) {
-	// Set CPU frequency scaling (Linux-specific)
-	// This would write to /sys/devices/system/cpu/cpu*/cpufreq/scaling_setspeed
-	
-	fmt.Printf("🖥️ Set CPU frequency to %d%%\n", percentage)
-}
-
-// 📊 MEMORY OPTIMIZATION WORKER
-func (qb *QuantumBot) memoryOptimizationWorker() {
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 	
 	for range ticker.C {
-		qb.optimizeMemoryUsage()
-		qb.updateMemoryStats()
-		qb.performMemoryMaintenance()
-	}
-}
-
-func (qb *QuantumBot) optimizeMemoryUsage() {
-	// Optimize memory usage patterns
-	
-	// Force garbage collection if memory pressure is high
-	totalAllocated := atomic.LoadInt64(&qb.memoryAllocator.totalAllocated)
-	if totalAllocated > 500*1024*1024 { // 500MB threshold
-		runtime.GC()
-		fmt.Printf("💾 Forced garbage collection: %d MB allocated\n", totalAllocated/(1024*1024))
-	}
-	
-	// Optimize pool allocations
-	qb.optimizePoolAllocations()
-	
-	// Clean up temporary allocations
-	qb.cleanupTemporaryAllocations()
-}
-
-func (qb *QuantumBot) optimizePoolAllocations() {
-	// Optimize memory pool allocations based on usage patterns
-	
-	for name, pool := range qb.memoryAllocator.memoryPools {
-		if pool.poolType == PoolTemporary {
-			qb.cleanupTemporaryPool(name, pool)
-		}
-	}
-}
-
-func (qb *QuantumBot) cleanupTemporaryPool(name string, pool *MemoryPool) {
-	// Clean up old temporary allocations
-	cutoffTime := time.Now().Add(-30 * time.Second) // 30 seconds old
-	
-	cleanedCount := 0
-	for i, block := range pool.blocks {
-		if block.inUse && block.allocTime.Before(cutoffTime) {
-			pool.blocks[i].inUse = false
-			pool.used -= block.size
-			cleanedCount++
-		}
-	}
-	
-	if cleanedCount > 0 {
-		fmt.Printf("💾 Cleaned up %d temporary allocations in pool %s\n", cleanedCount, name)
-	}
-}
-
-func (qb *QuantumBot) cleanupTemporaryAllocations() {
-	// Clean up any remaining temporary allocations
-	tempPool := qb.memoryAllocator.memoryPools["temporary"]
-	if tempPool != nil {
-		qb.cleanupTemporaryPool("temporary", tempPool)
-	}
-}
-
-func (qb *QuantumBot) updateMemoryStats() {
-	// Update memory allocation statistics
-	stats := qb.memoryAllocator.allocationStats
-	
-	totalAllocated := atomic.LoadInt64(&qb.memoryAllocator.totalAllocated)
-	
-	// Update peak usage
-	if totalAllocated > stats.peakMemoryUsage {
-		stats.peakMemoryUsage = totalAllocated
-	}
-	
-	// Calculate average allocation size
-	totalAllocs := atomic.LoadInt64(&stats.totalAllocations)
-	if totalAllocs > 0 {
-		stats.averageAllocSize = totalAllocated / totalAllocs
-	}
-	
-	// Calculate fragmentation rate
-	stats.fragmentationRate = qb.calculateOverallFragmentation()
-}
-
-func (qb *QuantumBot) calculateOverallFragmentation() float64 {
-	totalFragmentation := 0.0
-	poolCount := 0
-	
-	for _, pool := range qb.memoryAllocator.memoryPools {
-		fragmentation := qb.calculateFragmentation(pool)
-		totalFragmentation += fragmentation
-		poolCount++
-	}
-	
-	if poolCount == 0 {
-		return 0
-	}
-	
-	return totalFragmentation / float64(poolCount)
-}
-
-func (qb *QuantumBot) performMemoryMaintenance() {
-	// Perform regular memory maintenance tasks
-	
-	// Defragment if fragmentation is high
-	overallFragmentation := qb.calculateOverallFragmentation()
-	if overallFragmentation > 0.4 {
-		qb.defragmentMemoryPools()
-	}
-	
-	// Rebalance pools if needed
-	qb.rebalanceMemoryPools()
-	
-	// Update memory statistics
-	qb.logMemoryStatistics()
-}
-
-func (qb *QuantumBot) logMemoryStatistics() {
-	stats := qb.memoryAllocator.allocationStats
-	totalAllocated := atomic.LoadInt64(&qb.memoryAllocator.totalAllocated)
-	
-	fmt.Printf("💾 Memory Stats - Allocated: %d MB, Peak: %d MB, Fragmentation: %.1f%%\n",
-		totalAllocated/(1024*1024),
-		stats.peakMemoryUsage/(1024*1024),
-		stats.fragmentationRate*100)
-}
-
-// 🚀 NETWORK OPTIMIZATION WORKER
-func (qb *QuantumBot) networkOptimizationWorker() {
-	if qb.kernelBypass == nil || !qb.kernelBypass.bypassActive {
-		return
-	}
-	
-	ticker := time.NewTicker(1 * time.Second)
-	defer ticker.Stop()
-	
-	for range ticker.C {
 		qb.optimizeNetworkPerformance()
-		qb.monitorNetworkQueues()
-		qb.maintainNetworkConnections()
 	}
 }
 
 func (qb *QuantumBot) optimizeNetworkPerformance() {
-	// Optimize network performance based on current conditions
-	
-	// Optimize RX/TX queue parameters
-	qb.optimizeRXTXQueues()
-	
-	// Balance packet processing load
-	qb.balancePacketProcessing()
-	
-	// Optimize buffer allocation
+	// Optimize network performance
 	qb.optimizeNetworkBuffers()
+	qb.optimizeRXTXQueues()
+	qb.monitorSocketPerformance()
 }
 
 func (qb *QuantumBot) optimizeRXTXQueues() {
-	// Optimize RX queue performance
-	for i := range qb.kernelBypass.rxQueues {
-		queue := &qb.kernelBypass.rxQueues[i]
-		utilization := qb.calculateQueueUtilization(queue.head, queue.tail, queue.size)
+	// Optimize RX/TX queue utilization
+	for i, rxQueue := range qb.kernelBypass.rxQueues {
+		if !rxQueue.active {
+			continue
+		}
 		
+		utilization := float64(rxQueue.head-rxQueue.tail) / float64(rxQueue.size)
 		if utilization > 0.9 {
-			// Queue is nearly full - increase processing priority
-			qb.prioritizeQueue("RX", queue.id)
+			fmt.Printf("🚀 RX Queue %d high utilization: %.1f%%\n", i, utilization*100)
 		}
 	}
 	
-	// Optimize TX queue performance
-	for i := range qb.kernelBypass.txQueues {
-		queue := &qb.kernelBypass.txQueues[i]
-		utilization := qb.calculateQueueUtilization(queue.head, queue.tail, queue.size)
+	for i, txQueue := range qb.kernelBypass.txQueues {
+		if !txQueue.active {
+			continue
+		}
 		
+		utilization := float64(txQueue.head-txQueue.tail) / float64(txQueue.size)
 		if utilization > 0.9 {
-			// Queue is nearly full - increase processing priority
-			qb.prioritizeQueue("TX", queue.id)
+			fmt.Printf("🚀 TX Queue %d high utilization: %.1f%%\n", i, utilization*100)
 		}
 	}
 }
 
-func (qb *QuantumBot) calculateQueueUtilization(head, tail, size uint16) float64 {
-	var used uint16
-	if tail >= head {
-		used = tail - head
-	} else {
-		used = size - head + tail
+func (qb *QuantumBot) monitorSocketPerformance() {
+	// Monitor raw socket performance
+	activeSocketCount := len(qb.kernelBypass.rawSockets)
+	if activeSocketCount > 0 {
+		fmt.Printf("🚀 Active raw sockets: %d\n", activeSocketCount)
 	}
-	
-	return float64(used) / float64(size)
-}
-
-func (qb *QuantumBot) prioritizeQueue(queueType string, queueID uint16) {
-	fmt.Printf("🚀 Prioritizing %s queue %d for high utilization\n", queueType, queueID)
-	
-	// This would involve adjusting CPU scheduling and interrupt handling
-	// for the specific queue
-}
-
-func (qb *QuantumBot) balancePacketProcessing() {
-	// Balance packet processing load across available cores
-	
-	activeRXQueues := 0
-	activeTXQueues := 0
-	
-	for _, queue := range qb.kernelBypass.rxQueues {
-		if queue.active {
-			activeRXQueues++
-		}
-	}
-	
-	for _, queue := range qb.kernelBypass.txQueues {
-		if queue.active {
-			activeTXQueues++
-		}
-	}
-	
-	totalQueues := activeRXQueues + activeTXQueues
-	availableCores := len(qb.cpuAffinityManager.dedicatedCores)
-	
-	if totalQueues > availableCores {
-		// Need to multiplex queues on cores
-		qb.multiplexQueuesOnCores()
-	}
-}
-
-func (qb *QuantumBot) multiplexQueuesOnCores() {
-	// Assign multiple queues to each core for optimal performance
-	coreCount := len(qb.cpuAffinityManager.dedicatedCores)
-	
-	// Assign RX queues
-	for i, queue := range qb.kernelBypass.rxQueues {
-		if queue.active {
-			core := qb.cpuAffinityManager.dedicatedCores[i%coreCount]
-			qb.assignQueueToCore("RX", queue.id, core)
-		}
-	}
-	
-	// Assign TX queues
-	for i, queue := range qb.kernelBypass.txQueues {
-		if queue.active {
-			core := qb.cpuAffinityManager.dedicatedCores[i%coreCount]
-			qb.assignQueueToCore("TX", queue.id, core)
-		}
-	}
-}
-
-func (qb *QuantumBot) assignQueueToCore(queueType string, queueID uint16, core int) {
-	assignment := fmt.Sprintf("%s-queue-%d", queueType, queueID)
-	qb.cpuAffinityManager.coreAssignments[assignment] = core
-	
-	fmt.Printf("🚀 Assigned %s queue %d to CPU core %d\n", queueType, queueID, core)
-}
-
-func (qb *QuantumBot) monitorNetworkQueues() {
-	// Monitor network queue health and performance
-	
-	for _, queue := range qb.kernelBypass.rxQueues {
-		if queue.active {
-			qb.monitorRXQueue(&queue)
-		}
-	}
-	
-	for _, queue := range qb.kernelBypass.txQueues {
-		if queue.active {
-			qb.monitorTXQueue(&queue)
-		}
-	}
-}
-
-func (qb *QuantumBot) monitorRXQueue(queue *RXQueue) {
-	utilization := qb.calculateQueueUtilization(queue.head, queue.tail, queue.size)
-	
-	if utilization > 0.95 {
-		fmt.Printf("⚠️ RX Queue %d near capacity: %.1f%%\n", queue.id, utilization*100)
-		qb.handleQueueCongestion("RX", queue.id)
-	}
-}
-
-func (qb *QuantumBot) monitorTXQueue(queue *TXQueue) {
-	utilization := qb.calculateQueueUtilization(queue.head, queue.tail, queue.size)
-	
-	if utilization > 0.95 {
-		fmt.Printf("⚠️ TX Queue %d near capacity: %.1f%%\n", queue.id, utilization*100)
-		qb.handleQueueCongestion("TX", queue.id)
-	}
-}
-
-func (qb *QuantumBot) handleQueueCongestion(queueType string, queueID uint16) {
-	// Handle queue congestion by increasing processing priority
-	// and potentially expanding queue size
-	
-	fmt.Printf("🚀 Handling %s queue %d congestion\n", queueType, queueID)
-	
-	// Increase processing priority
-	qb.prioritizeQueue(queueType, queueID)
-	
-	// Consider expanding queue if consistently congested
-	qb.considerQueueExpansion(queueType, queueID)
-}
-
-func (qb *QuantumBot) considerQueueExpansion(queueType string, queueID uint16) {
-	// Consider expanding queue size if consistently congested
-	fmt.Printf("🚀 Considering expansion of %s queue %d\n", queueType, queueID)
-	
-	// This would involve reallocating queue buffers with larger size
-}
-
-func (qb *QuantumBot) maintainNetworkConnections() {
-	// Maintain raw socket connections
-	for i, fd := range qb.kernelBypass.rawSockets {
-		if !qb.isSocketHealthy(fd) {
-			fmt.Printf("⚠️ Raw socket %d unhealthy, recreating\n", i)
-			qb.recreateRawSocket(i)
-		}
-	}
-}
-
-func (qb *QuantumBot) isSocketHealthy(fd int) bool {
-	// Check if socket is healthy
-	// This would involve checking socket status and error conditions
-	
-	// Simple health check - try to get socket options
-	_, err := syscall.GetsockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_ERROR)
-	return err == nil
-}
-
-func (qb *QuantumBot) recreateRawSocket(index int) {
-	// Close old socket
-	if index < len(qb.kernelBypass.rawSockets) {
-		syscall.Close(qb.kernelBypass.rawSockets[index])
-	}
-	
-	// Create new socket
-	fd, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_RAW, syscall.IPPROTO_TCP)
-	if err != nil {
-		fmt.Printf("⚠️ Failed to recreate raw socket %d: %v\n", index, err)
-		return
-	}
-	
-	// Configure socket
-	syscall.SetsockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_REUSEADDR, 1)
-	syscall.SetsockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_PRIORITY, 7)
-	
-	bufferSize := 1024 * 1024
-	syscall.SetsockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_RCVBUF, bufferSize)
-	syscall.SetsockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_SNDBUF, bufferSize)
-	
-	// Replace in array
-	if index < len(qb.kernelBypass.rawSockets) {
-		qb.kernelBypass.rawSockets[index] = fd
-	} else {
-		qb.kernelBypass.rawSockets = append(qb.kernelBypass.rawSockets, fd)
-	}
-	
-	fmt.Printf("🚀 Recreated raw socket %d successfully\n", index)
-}
-
-// 🎯 HARDWARE PERFORMANCE METRICS
-func (qb *QuantumBot) getHardwarePerformanceMetrics() map[string]interface{} {
-	metrics := make(map[string]interface{})
-	
-	// CPU metrics
-	metrics["cpu"] = map[string]interface{}{
-		"dedicated_cores":    qb.cpuAffinityManager.dedicatedCores,
-		"average_usage":      qb.calculateAverageCPUUsage(),
-		"optimization_active": qb.cpuAffinityManager.optimizationActive,
-		"thermal_throttle":   qb.cpuAffinityManager.thermalManagement.throttleActive,
-		"current_temp":       qb.cpuAffinityManager.thermalManagement.currentTemp,
-	}
-	
-	// Memory metrics
-	totalAllocated := atomic.LoadInt64(&qb.memoryAllocator.totalAllocated)
-	stats := qb.memoryAllocator.allocationStats
-	
-	metrics["memory"] = map[string]interface{}{
-		"total_allocated_mb":    totalAllocated / (1024 * 1024),
-		"peak_usage_mb":         stats.peakMemoryUsage / (1024 * 1024),
-		"total_allocations":     atomic.LoadInt64(&stats.totalAllocations),
-		"fragmentation_rate":    stats.fragmentationRate,
-		"huge_pages_enabled":    qb.memoryAllocator.hugePagesEnabled,
-		"numa_optimization":     qb.memoryAllocator.numaOptimization,
-	}
-	
-	// Network metrics
-	if qb.kernelBypass != nil {
-		metrics["network"] = map[string]interface{}{
-			"kernel_bypass_active": qb.kernelBypass.bypassActive,
-			"raw_sockets":          len(qb.kernelBypass.rawSockets),
-			"packet_buffers":       len(qb.kernelBypass.packetBuffers),
-			"rx_queues":           len(qb.kernelBypass.rxQueues),
-			"tx_queues":           len(qb.kernelBypass.txQueues),
-			"dpdk_enabled":        qb.kernelBypass.dpdk != nil && qb.kernelBypass.dpdk.enabled,
-		}
-	}
-	
-	return metrics
 }
