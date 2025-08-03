@@ -1,566 +1,375 @@
 package server
 
 import (
-	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"math"
 	"net/http"
-	"pi/util"
-	"sync"
 	"time"
-	"math/rand"
-	"runtime"
 
 	"github.com/gin-gonic/gin"
-	"github.com/gorilla/websocket"
-	"github.com/stellar/go/keypair"
+	"github.com/stellar/go/clients/horizonclient"
+	"github.com/stellar/go/network"
 	"github.com/stellar/go/protocols/horizon"
+	"github.com/stellar/go/txnbuild"
 )
 
-// Enhanced request structure with advanced options
-type EnhancedWithdrawRequest struct {
-	SeedPhrase        string  `json:"seed_phrase"`
-	LockedBalanceID   string  `json:"locked_balance_id"`
-	WithdrawalAddress string  `json:"withdrawal_address"`
-	Amount            string  `json:"amount"`
-	MaxFee           float64 `json:"max_fee,omitempty"`           // Dynamic fee ceiling
-	Priority         int     `json:"priority,omitempty"`          // Operation priority
-	ConcurrentClaims int     `json:"concurrent_claims,omitempty"` // Parallel attempts
-	PreWarmSeconds   int     `json:"pre_warm_seconds,omitempty"`  // Pre-positioning time
+// TRANSACTION HANDLER
+type TransactionHandler struct {
+	bot            *QuantumBot  // Changed from Server to QuantumBot
+	stellarClient  *horizonclient.Client
+	networkMonitor *TransactionNetworkMonitor  // Renamed to avoid conflict
 }
 
-// Enhanced response with detailed metrics
-type EnhancedWithdrawResponse struct {
-	Time             string  `json:"time"`
-	AttemptNumber    int     `json:"attempt_number"`
-	RecipientAddress string  `json:"recipient_address"`
-	SenderAddress    string  `json:"sender_address"`
-	Amount           float64 `json:"amount"`
-	Success          bool    `json:"success"`
-	Message          string  `json:"message"`
-	Action           string  `json:"action"`
-	NetworkLatency   int64   `json:"network_latency_ms"`
-	FeeUsed          float64 `json:"fee_used"`
-	OperationType    string  `json:"operation_type"`
-	ConnectionID     string  `json:"connection_id"`
+type TransactionNetworkMonitor struct {
+	transactions    []StellarTransaction
+	successRate     float64
+	averageLatency  time.Duration
+	lastUpdate      time.Time
+	feeTrends       []FeeTrend
 }
 
-// Connection pool for multiplexing
-type ConnectionPool struct {
-	connections []*websocket.Conn
-	mutex       sync.RWMutex
-	roundRobin  int
+type StellarTransaction struct {
+	Hash           string
+	SourceAccount  string
+	Sequence       int64
+	Fee            int64
+	OperationCount int
+	Timestamp      time.Time
+	Status         string
+	Ledger         int32
 }
 
-// Priority queue for operations
-type PriorityOperation struct {
-	Priority  int
-	Operation func()
-	Timestamp time.Time
+type FeeTrend struct {
+	Timestamp   time.Time
+	AverageFee  int64
+	MedianFee   int64
+	MinFee      int64
+	MaxFee      int64
+	TxCount     int
 }
 
-// Enhanced server with advanced capabilities
-type EnhancedServer struct {
-	*Server
-	connectionPool    *ConnectionPool
-	priorityQueue     chan PriorityOperation
-	claimWorkers      sync.WaitGroup
-	transferWorkers   sync.WaitGroup
-	networkMonitor    *NetworkMonitor
-	feeCalculator     *DynamicFeeCalculator
-	timingPredictor   *TimingPredictor
-}
-
-// Network monitoring for adaptive behavior
-type NetworkMonitor struct {
-	avgLatency     time.Duration
-	congestionRate float64
-	lastUpdate     time.Time
-	mutex          sync.RWMutex
-}
-
-// Dynamic fee calculation based on network conditions
-type DynamicFeeCalculator struct {
-	baseFee       float64
-	congestionFee float64
-	competitorFee float64
-	maxFee        float64
-	mutex         sync.RWMutex
-}
-
-// Advanced timing prediction system
-type TimingPredictor struct {
-	networkOffset time.Duration
-	latencyBuffer time.Duration
-	lastSync      time.Time
-	mutex         sync.RWMutex
-}
-
-var enhancedUpgrader = websocket.Upgrader{
-	ReadBufferSize:  4096,  // Increased buffer
-	WriteBufferSize: 4096,
-	CheckOrigin: func(r *http.Request) bool {
-		return true
-	},
-	EnableCompression: true, // WebSocket compression
-}
-
-func NewEnhancedServer(baseServer *Server) *EnhancedServer {
-	es := &EnhancedServer{
-		Server:          baseServer,
-		connectionPool:  &ConnectionPool{connections: make([]*websocket.Conn, 0, 10)},
-		priorityQueue:   make(chan PriorityOperation, 1000),
-		networkMonitor:  &NetworkMonitor{},
-		feeCalculator:   &DynamicFeeCalculator{baseFee: 1_000_000, maxFee: 15_000_000},
-		timingPredictor: &TimingPredictor{latencyBuffer: 50 * time.Millisecond},
-	}
+func NewTransactionHandler(bot *QuantumBot) *TransactionHandler {  // Changed from Server to QuantumBot
+	client := horizonclient.DefaultTestNetClient
 	
-	// Start background workers
-	go es.priorityWorker()
-	go es.networkMonitorWorker()
-	go es.feeMonitorWorker()
+	return &TransactionHandler{
+		bot:           bot,
+		stellarClient: client,
+		networkMonitor: &TransactionNetworkMonitor{
+			transactions: make([]StellarTransaction, 0),
+			feeTrends:    make([]FeeTrend, 0),
+			lastUpdate:   time.Now(),
+		},
+	}
+}
+
+func (th *TransactionHandler) MonitorTransactions(c *gin.Context) {
+	// Update network monitor
+	th.updateNetworkMetrics()
 	
-	return es
-}
-
-// Enhanced withdraw endpoint with concurrent processing
-func (es *EnhancedServer) EnhancedWithdraw(ctx *gin.Context) {
-	conn, err := enhancedUpgrader.Upgrade(ctx.Writer, ctx.Request, nil)
-	if err != nil {
-		ctx.JSON(500, gin.H{"message": "Failed to upgrade to WebSocket"})
-		return
-	}
-
-	// Add to connection pool
-	connectionID := es.addToConnectionPool(conn)
-	defer es.removeFromConnectionPool(connectionID)
-
-	var req EnhancedWithdrawRequest
-	_, message, err := conn.ReadMessage()
-	if err != nil {
-		conn.WriteJSON(gin.H{"message": "Invalid request"})
-		return
-	}
-
-	err = json.Unmarshal(message, &req)
-	if err != nil {
-		conn.WriteJSON(gin.H{"message": "Malformed JSON"})
-		return
-	}
-
-	// Set defaults for enhanced features
-	if req.ConcurrentClaims == 0 {
-		req.ConcurrentClaims = runtime.NumCPU() * 2
-	}
-	if req.MaxFee == 0 {
-		req.MaxFee = 15_000_000 // 15M PI max
-	}
-	if req.PreWarmSeconds == 0 {
-		req.PreWarmSeconds = 30
-	}
-
-	kp, err := util.GetKeyFromSeed(req.SeedPhrase)
-	if err != nil {
-		ctx.AbortWithStatusJSON(400, gin.H{"message": "invalid seed phrase"})
-		return
-	}
-
-	// CONCURRENT PROCESSING: Start transfer and claim operations independently
-	go es.handleInstantTransfer(conn, kp, req, connectionID)
-	es.handleScheduledClaim(conn, kp, req, connectionID)
-}
-
-// Immediate transfer of available balance (independent of claiming)
-func (es *EnhancedServer) handleInstantTransfer(conn *websocket.Conn, kp *keypair.Full, req EnhancedWithdrawRequest, connID string) {
-	availableBalance, err := es.wallet.GetAvailableBalance(kp)
-	if err != nil {
-		es.sendEnhancedResponse(conn, EnhancedWithdrawResponse{
-			Action:        "transfer_error",
-			Message:       "error getting available balance: " + err.Error(),
-			Success:       false,
-			OperationType: "transfer",
-			ConnectionID:  connID,
-		})
-		return
-	}
-
-	if availableBalance != "0" {
-		// Use dynamic fee for transfer
-		dynamicFee := es.feeCalculator.calculateOptimalFee()
-		
-		transferStart := time.Now()
-		err = es.wallet.TransferWithDynamicFee(kp, availableBalance, req.WithdrawalAddress, dynamicFee)
-		latency := time.Since(transferStart).Milliseconds()
-
-		if err == nil {
-			es.sendEnhancedResponse(conn, EnhancedWithdrawResponse{
-				Action:         "transfer_success",
-				Message:        "successfully transferred available balance",
-				Success:        true,
-				OperationType:  "transfer",
-				NetworkLatency: latency,
-				FeeUsed:        dynamicFee,
-				ConnectionID:   connID,
-			})
-		} else {
-			es.sendEnhancedResponse(conn, EnhancedWithdrawResponse{
-				Action:         "transfer_failed",
-				Message:        "transfer failed: " + err.Error(),
-				Success:        false,
-				OperationType:  "transfer",
-				NetworkLatency: latency,
-				ConnectionID:   connID,
-			})
-		}
-	}
-}
-
-// Enhanced scheduled claim with advanced features
-func (es *EnhancedServer) handleScheduledClaim(conn *websocket.Conn, kp *keypair.Full, req EnhancedWithdrawRequest, connID string) {
-	balance, err := es.wallet.GetClaimableBalance(req.LockedBalanceID)
-	if err != nil {
-		es.sendEnhancedResponse(conn, EnhancedWithdrawResponse{
-			Message:       err.Error(),
-			Success:       false,
-			OperationType: "claim",
-			ConnectionID:  connID,
-		})
-		return
-	}
-
-	for _, claimant := range balance.Claimants {
-		if claimant.Destination == kp.Address() {
-			claimableAt, ok := util.ExtractClaimableTime(claimant.Predicate)
-			if !ok {
-				es.sendEnhancedResponse(conn, EnhancedWithdrawResponse{
-					Message:       "error finding unlock time",
-					Success:       false,
-					OperationType: "claim",
-					ConnectionID:  connID,
-				})
-				return
-			}
-
-			// Enhanced timing with network synchronization
-			adjustedClaimTime := es.timingPredictor.adjustForNetworkConditions(claimableAt)
-			
-			es.sendEnhancedResponse(conn, EnhancedWithdrawResponse{
-				Action:        "claim_scheduled",
-				Message:       fmt.Sprintf("Scheduled claim for %s (adjusted for network)", adjustedClaimTime.Format("Jan 2 3:04:05.000 PM")),
-				Success:       true,
-				OperationType: "claim",
-				ConnectionID:  connID,
-			})
-
-			// Pre-warm connections before claim time
-			preWarmTime := adjustedClaimTime.Add(-time.Duration(req.PreWarmSeconds) * time.Second)
-			waitDuration := time.Until(preWarmTime)
-			
-			if waitDuration > 0 {
-				time.AfterFunc(waitDuration, func() {
-					es.preWarmForClaim(conn, kp, req, connID)
-				})
-			} else {
-				es.preWarmForClaim(conn, kp, req, connID)
-			}
-
-			// Schedule the actual claim with precise timing
-			claimWaitDuration := time.Until(adjustedClaimTime)
-			if claimWaitDuration < 0 {
-				claimWaitDuration = 0
-			}
-
-			time.AfterFunc(claimWaitDuration, func() {
-				es.executeConcurrentClaim(conn, kp, balance, req, connID)
-			})
-		}
-	}
-}
-
-// Pre-warm system resources before claim time
-func (es *EnhancedServer) preWarmForClaim(conn *websocket.Conn, kp *keypair.Full, req EnhancedWithdrawRequest, connID string) {
-	es.sendEnhancedResponse(conn, EnhancedWithdrawResponse{
-		Action:        "pre_warming",
-		Message:       "Pre-warming connections and preparing for claim",
-		Success:       true,
-		OperationType: "claim",
-		ConnectionID:  connID,
-	})
-
-	// Pre-load account data
-	go func() {
-		es.wallet.GetAccount(kp)
-	}()
-
-	// Establish additional connections
-	es.expandConnectionPool()
-
-	// Sync network time
-	es.timingPredictor.syncNetworkTime()
-}
-
-// Execute concurrent claim attempts with intelligent retry
-func (es *EnhancedServer) executeConcurrentClaim(conn *websocket.Conn, kp *keypair.Full, balance *horizon.ClaimableBalance, req EnhancedWithdrawRequest, connID string) {
-	defer conn.Close()
-	
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
-
-	senderAddress := kp.Address()
-	successChan := make(chan EnhancedWithdrawResponse, req.ConcurrentClaims)
-	
-	es.sendEnhancedResponse(conn, EnhancedWithdrawResponse{
-		Action:        "claim_started",
-		Message:       fmt.Sprintf("Started %d concurrent claim attempts", req.ConcurrentClaims),
-		Success:       true,
-		OperationType: "claim",
-		ConnectionID:  connID,
-	})
-
-	// Launch concurrent claim workers
-	for i := 0; i < req.ConcurrentClaims; i++ {
-		es.claimWorkers.Add(1)
-		go es.claimWorker(ctx, i+1, kp, req, senderAddress, successChan, connID)
-	}
-
-	// Monitor for first success
-	go func() {
-		es.claimWorkers.Wait()
-		close(successChan)
-	}()
-
-	var lastError string
-	attemptCount := 0
-	
-	for response := range successChan {
-		attemptCount++
-		response.AttemptNumber = attemptCount
-		response.Time = time.Now().Format("15:04:05.000")
-		
-		es.sendEnhancedResponse(conn, response)
-		
-		if response.Success {
-			cancel() // Stop all other workers
-			return
-		}
-		lastError = response.Message
-	}
-
-	// All attempts failed
-	es.sendEnhancedResponse(conn, EnhancedWithdrawResponse{
-		AttemptNumber: attemptCount,
-		Success:       false,
-		Message:       fmt.Sprintf("All %d attempts failed. Last error: %s", attemptCount, lastError),
-		OperationType: "claim",
-		ConnectionID:  connID,
+	c.JSON(http.StatusOK, gin.H{
+		"status":        "monitoring",
+		"success_rate":  th.networkMonitor.successRate,
+		"avg_latency":   th.networkMonitor.averageLatency.Milliseconds(),
+		"last_update":   th.networkMonitor.lastUpdate,
+		"transaction_count": len(th.networkMonitor.transactions),
 	})
 }
 
-// Individual claim worker with exponential backoff
-func (es *EnhancedServer) claimWorker(ctx context.Context, workerID int, kp *keypair.Full, req EnhancedWithdrawRequest, senderAddress string, resultChan chan<- EnhancedWithdrawResponse, connID string) {
-	defer es.claimWorkers.Done()
-
-	maxAttempts := 50
-	baseDelay := 50 * time.Millisecond
+func (th *TransactionHandler) GetTransactionHistory(c *gin.Context) {
+	// Get recent transactions
+	recentTxs := th.getRecentTransactions(100)
 	
-	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
+	c.JSON(http.StatusOK, gin.H{
+		"transactions": recentTxs,
+		"count":       len(recentTxs),
+		"timestamp":   time.Now(),
+	})
+}
 
-		// Add jitter to prevent thundering herd
-		jitter := time.Duration(rand.Intn(100)) * time.Millisecond
-		delay := time.Duration(math.Pow(1.5, float64(attempt-1))) * baseDelay + jitter
+func (th *TransactionHandler) OptimizeTransaction(c *gin.Context) {
+	var req struct {
+		SourceAccount string `json:"source_account"`
+		Amount        string `json:"amount"`
+		Destination   string `json:"destination"`
+	}
+	
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	
+	// Use quantum systems for optimization
+	optimalFee := th.calculateOptimalFee()
+	optimalTiming := th.bot.getQuantumPrecisionTime()
+	
+	c.JSON(http.StatusOK, gin.H{
+		"optimal_fee":    optimalFee,
+		"optimal_timing": optimalTiming.Unix(),
+		"confidence":     th.calculateConfidence(),
+		"quantum_enhanced": true,
+	})
+}
+
+func (th *TransactionHandler) updateNetworkMetrics() {
+	// Fetch recent transactions from Stellar network
+	txs, err := th.fetchRecentTransactions()
+	if err != nil {
+		return
+	}
+	
+	// Update success rate
+	successCount := 0
+	totalLatency := time.Duration(0)
+	
+	for _, tx := range txs {
+		if tx.Status == "success" {
+			successCount++
+		}
+		// Calculate latency (simplified)
+		latency := time.Since(tx.Timestamp)
+		totalLatency += latency
+	}
+	
+	if len(txs) > 0 {
+		th.networkMonitor.successRate = float64(successCount) / float64(len(txs))
+		th.networkMonitor.averageLatency = totalLatency / time.Duration(len(txs))
+	}
+	
+	th.networkMonitor.transactions = txs
+	th.networkMonitor.lastUpdate = time.Now()
+	
+	// Update fee trends
+	th.updateFeeTrends(txs)
+}
+
+func (th *TransactionHandler) fetchRecentTransactions() ([]StellarTransaction, error) {
+	// Fetch transactions from Stellar Horizon API
+	request := horizonclient.TransactionRequest{
+		Limit: 200,
+		Order: horizonclient.OrderDesc,
+	}
+	
+	txPage, err := th.stellarClient.Transactions(request)
+	if err != nil {
+		return nil, err
+	}
+	
+	transactions := make([]StellarTransaction, 0)
+	
+	for _, tx := range txPage.Embedded.Records {
+		stellarTx := StellarTransaction{
+			Hash:          tx.Hash,
+			SourceAccount: tx.SourceAccount,
+			Sequence:      tx.SourceAccountSequence,
+			Fee:           tx.FeePaid,
+			OperationCount: tx.OperationCount,
+			Timestamp:     tx.CreatedAt,
+			Status:        determineStatus(tx),
+			Ledger:        tx.Ledger,
+		}
 		
-		if attempt > 1 {
-			time.Sleep(delay)
+		transactions = append(transactions, stellarTx)
+	}
+	
+	return transactions, nil
+}
+
+func determineStatus(tx horizon.Transaction) string {
+	if tx.Successful {
+		return "success"
+	}
+	return "failed"
+}
+
+func (th *TransactionHandler) updateFeeTrends(transactions []StellarTransaction) {
+	if len(transactions) == 0 {
+		return
+	}
+	
+	// Group transactions by time periods (e.g., every 5 minutes)
+	feeTrend := FeeTrend{
+		Timestamp: time.Now(),
+		TxCount:   len(transactions),
+	}
+	
+	totalFee := int64(0)
+	minFee := transactions[0].Fee
+	maxFee := transactions[0].Fee
+	
+	for _, tx := range transactions {
+		totalFee += tx.Fee
+		if tx.Fee < minFee {
+			minFee = tx.Fee
 		}
-
-		// Calculate dynamic fee based on current network conditions
-		dynamicFee := es.feeCalculator.calculateCompetitiveFee(attempt, req.MaxFee)
-		
-		start := time.Now()
-		hash, amount, err := es.wallet.WithdrawClaimableBalanceWithDynamicFee(kp, req.Amount, req.LockedBalanceID, req.WithdrawalAddress, dynamicFee)
-		latency := time.Since(start).Milliseconds()
-
-		response := EnhancedWithdrawResponse{
-			RecipientAddress: req.WithdrawalAddress,
-			SenderAddress:    senderAddress,
-			Amount:           amount,
-			NetworkLatency:   latency,
-			FeeUsed:          dynamicFee,
-			OperationType:    "claim",
-			ConnectionID:     connID,
-		}
-
-		if err == nil {
-			response.Success = true
-			response.Message = fmt.Sprintf("Worker %d succeeded: %s", workerID, hash)
-			resultChan <- response
-			return
-		} else {
-			response.Success = false
-			response.Message = fmt.Sprintf("Worker %d attempt %d failed: %s (fee: %.0f)", workerID, attempt, err.Error(), dynamicFee)
-			resultChan <- response
-		}
-
-		// Adaptive retry logic based on error type
-		if es.shouldStopRetrying(err) {
-			return
-		}
-	}
-}
-
-// Enhanced fee calculator with competitive intelligence
-func (df *DynamicFeeCalculator) calculateCompetitiveFee(attempt int, maxFee float64) float64 {
-	df.mutex.Lock()
-	defer df.mutex.Unlock()
-
-	// Base competitive fee (higher than standard)
-	baseFee := 5_000_000.0 // 5M PI base
-
-	// Escalation based on attempt number
-	escalationFactor := 1.0 + (0.3 * float64(attempt-1)) // 30% increase per attempt
-
-	// Network congestion multiplier
-	congestionMultiplier := 1.0 + df.congestionRate
-
-	// Competitor intelligence (use known successful fees)
-	competitorBuffer := 1.2 // 20% higher than known competitor fees
-
-	calculatedFee := baseFee * escalationFactor * congestionMultiplier * competitorBuffer
-
-	// Cap at maximum allowed fee
-	if calculatedFee > maxFee {
-		calculatedFee = maxFee
-	}
-
-	return calculatedFee
-}
-
-// Network-aware timing prediction
-func (tp *TimingPredictor) adjustForNetworkConditions(claimTime time.Time) time.Time {
-	tp.mutex.Lock()
-	defer tp.mutex.Unlock()
-
-	// Adjust for network latency and clock skew
-	adjustedTime := claimTime.Add(-tp.latencyBuffer).Add(-tp.networkOffset)
-	
-	return adjustedTime
-}
-
-// Connection pool management
-func (es *EnhancedServer) addToConnectionPool(conn *websocket.Conn) string {
-	es.connectionPool.mutex.Lock()
-	defer es.connectionPool.mutex.Unlock()
-	
-	connectionID := fmt.Sprintf("conn_%d_%d", time.Now().Unix(), len(es.connectionPool.connections))
-	es.connectionPool.connections = append(es.connectionPool.connections, conn)
-	
-	return connectionID
-}
-
-func (es *EnhancedServer) removeFromConnectionPool(connectionID string) {
-	es.connectionPool.mutex.Lock()
-	defer es.connectionPool.mutex.Unlock()
-	
-	// Remove connection logic here
-}
-
-func (es *EnhancedServer) expandConnectionPool() {
-	// Add more connections for high-load periods
-}
-
-// Enhanced response sender
-func (es *EnhancedServer) sendEnhancedResponse(conn *websocket.Conn, res EnhancedWithdrawResponse) {
-	writeMu.Lock()
-	defer writeMu.Unlock()
-	conn.WriteJSON(res)
-}
-
-// Network monitoring worker
-func (es *EnhancedServer) networkMonitorWorker() {
-	ticker := time.NewTicker(1 * time.Second)
-	defer ticker.Stop()
-
-	for range ticker.C {
-		es.updateNetworkMetrics()
-	}
-}
-
-func (es *EnhancedServer) updateNetworkMetrics() {
-	// Implement network latency and congestion monitoring
-}
-
-// Fee monitoring worker
-func (es *EnhancedServer) feeMonitorWorker() {
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
-
-	for range ticker.C {
-		es.updateFeeIntelligence()
-	}
-}
-
-func (es *EnhancedServer) updateFeeIntelligence() {
-	// Monitor successful competitor fees and adjust strategy
-}
-
-// Priority worker for operation queuing
-func (es *EnhancedServer) priorityWorker() {
-	for op := range es.priorityQueue {
-		op.Operation()
-	}
-}
-
-// Enhanced error analysis for retry decisions
-func (es *EnhancedServer) shouldStopRetrying(err error) bool {
-	if err == nil {
-		return true
-	}
-	
-	errorMsg := err.Error()
-	
-	// Stop retrying for permanent failures
-	permanentErrors := []string{
-		"invalid destination",
-		"insufficient balance",
-		"malformed transaction",
-	}
-	
-	for _, permanentError := range permanentErrors {
-		if contains(errorMsg, permanentError) {
-			return true
+		if tx.Fee > maxFee {
+			maxFee = tx.Fee
 		}
 	}
 	
-	return false
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || 
-		(len(s) > len(substr) && 
-			(s[:len(substr)] == substr || 
-			 s[len(s)-len(substr):] == substr || 
-			 containsMiddle(s, substr))))
-}
-
-func containsMiddle(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
+	feeTrend.AverageFee = totalFee / int64(len(transactions))
+	feeTrend.MinFee = minFee
+	feeTrend.MaxFee = maxFee
+	
+	// Calculate median (simplified)
+	feeTrend.MedianFee = feeTrend.AverageFee
+	
+	th.networkMonitor.feeTrends = append(th.networkMonitor.feeTrends, feeTrend)
+	
+	// Keep only recent trends (last 24 hours)
+	cutoff := time.Now().Add(-24 * time.Hour)
+	filteredTrends := make([]FeeTrend, 0)
+	for _, trend := range th.networkMonitor.feeTrends {
+		if trend.Timestamp.After(cutoff) {
+			filteredTrends = append(filteredTrends, trend)
 		}
 	}
-	return false
+	th.networkMonitor.feeTrends = filteredTrends
 }
 
-// Timing predictor methods
-func (tp *TimingPredictor) syncNetworkTime() {
-	// Implement NTP-style time synchronization
-	tp.mutex.Lock()
-	defer tp.mutex.Unlock()
-	tp.lastSync = time.Now()
+func (th *TransactionHandler) calculateOptimalFee() int64 {
+	if len(th.networkMonitor.feeTrends) == 0 {
+		return 100 // Default fee
+	}
+	
+	// Use recent trends to calculate optimal fee
+	recentTrend := th.networkMonitor.feeTrends[len(th.networkMonitor.feeTrends)-1]
+	
+	// Add 10% buffer to average fee for faster confirmation
+	optimalFee := int64(float64(recentTrend.AverageFee) * 1.1)
+	
+	return optimalFee
+}
+
+func (th *TransactionHandler) calculateConfidence() float64 {
+	// Calculate confidence based on network stability and AI predictions
+	if th.bot.neuralPredictor == nil {
+		return 0.7 // Default confidence
+	}
+	
+	// Combine network metrics with AI confidence
+	networkStability := th.networkMonitor.successRate
+	aiConfidence := th.bot.performanceMetrics.AIAccuracy
+	
+	return (networkStability + aiConfidence) / 2.0
+}
+
+func (th *TransactionHandler) getRecentTransactions(limit int) []StellarTransaction {
+	if len(th.networkMonitor.transactions) <= limit {
+		return th.networkMonitor.transactions
+	}
+	
+	return th.networkMonitor.transactions[:limit]
+}
+
+// TRANSACTION BUILDING HELPERS
+func (th *TransactionHandler) BuildOptimizedTransaction(sourceKP *txnbuild.SimpleKeypair, destAccount string, amount string) (*txnbuild.Transaction, error) {
+	// Get source account details
+	sourceAccountRequest := horizonclient.AccountRequest{AccountID: sourceKP.Address()}
+	sourceAccount, err := th.stellarClient.AccountDetail(sourceAccountRequest)
+	if err != nil {
+		return nil, err
+	}
+	
+	// Calculate optimal fee using quantum systems
+	optimalFee := th.calculateOptimalFee()
+	
+	// Build payment operation
+	paymentOp := txnbuild.Payment{
+		Destination: destAccount,
+		Amount:      amount,
+		Asset:       txnbuild.NativeAsset{},
+	}
+	
+	// Build transaction with quantum-optimized fee
+	tx, err := txnbuild.NewTransaction(
+		txnbuild.TransactionParams{
+			SourceAccount:        &sourceAccount,
+			IncrementSequenceNum: true,
+			Operations:           []txnbuild.Operation{&paymentOp},
+			BaseFee:              optimalFee,
+			Memo:                 txnbuild.MemoText("Quantum Optimized"),
+			Preconditions: txnbuild.Preconditions{
+				TimeBounds: txnbuild.NewInfiniteTimeout(),
+			},
+		},
+	)
+	
+	if err != nil {
+		return nil, err
+	}
+	
+	return tx, nil
+}
+
+func (th *TransactionHandler) SubmitWithQuantumTiming(tx *txnbuild.Transaction, signers ...*txnbuild.SimpleKeypair) (*horizon.Transaction, error) {
+	// Sign transaction
+	for _, signer := range signers {
+		tx, err := tx.Sign(network.TestNetworkPassphrase, signer)
+		if err != nil {
+			return nil, err
+		}
+	}
+	
+	// Wait for optimal quantum timing
+	optimalTime := th.bot.getQuantumPrecisionTime()
+	waitDuration := time.Until(optimalTime)
+	
+	if waitDuration > 0 && waitDuration < 5*time.Second {
+		time.Sleep(waitDuration)
+	}
+	
+	// Submit transaction
+	resp, err := th.stellarClient.SubmitTransaction(tx)
+	if err != nil {
+		return nil, err
+	}
+	
+	return &resp, nil
+}
+
+// TRANSACTION ANALYSIS
+func (th *TransactionHandler) AnalyzeNetworkConditions() map[string]interface{} {
+	return map[string]interface{}{
+		"success_rate":    th.networkMonitor.successRate,
+		"avg_latency_ms":  th.networkMonitor.averageLatency.Milliseconds(),
+		"transaction_count": len(th.networkMonitor.transactions),
+		"fee_trends":      th.getFeeTrendSummary(),
+		"network_health":  th.calculateNetworkHealth(),
+		"optimal_fee":     th.calculateOptimalFee(),
+		"quantum_timing":  th.bot.getQuantumPrecisionTime().Unix(),
+	}
+}
+
+func (th *TransactionHandler) getFeeTrendSummary() map[string]interface{} {
+	if len(th.networkMonitor.feeTrends) == 0 {
+		return map[string]interface{}{
+			"trend": "no_data",
+		}
+	}
+	
+	recent := th.networkMonitor.feeTrends[len(th.networkMonitor.feeTrends)-1]
+	
+	return map[string]interface{}{
+		"average_fee": recent.AverageFee,
+		"min_fee":     recent.MinFee,
+		"max_fee":     recent.MaxFee,
+		"tx_count":    recent.TxCount,
+		"timestamp":   recent.Timestamp,
+	}
+}
+
+func (th *TransactionHandler) calculateNetworkHealth() string {
+	successRate := th.networkMonitor.successRate
+	avgLatency := th.networkMonitor.averageLatency
+	
+	if successRate > 0.95 && avgLatency < 5*time.Second {
+		return "excellent"
+	} else if successRate > 0.90 && avgLatency < 10*time.Second {
+		return "good"
+	} else if successRate > 0.80 && avgLatency < 20*time.Second {
+		return "fair"
+	} else {
+		return "poor"
+	}
 }

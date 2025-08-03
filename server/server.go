@@ -20,7 +20,6 @@ type QuantumBot struct {
 	upgrader         websocket.Upgrader
 	connections      map[*websocket.Conn]bool
 	connectionsMutex sync.RWMutex
-	distributedLedger  *DistributedLedger
 	
 	// Performance Metrics
 	performanceMetrics *PerformanceMetrics
@@ -48,6 +47,11 @@ type QuantumBot struct {
 	// Network Systems
 	networkMonitor     *NetworkMonitor
 	memoryPoolSniffer  *MemoryPoolSniffer
+	
+	// Network Warfare
+	networkFlooder     *NetworkFlooder
+	ddosProtection     *DDoSProtection
+	trafficAnalyzer    *TrafficAnalyzer
 	
 	// Security
 	securityManager    *SecurityManager
@@ -167,6 +171,7 @@ func NewQuantumBot() *QuantumBot {
 	qb.initializeQuantumSystems()
 	qb.initializeAISystems()
 	qb.initializeSwarmIntelligence()
+	qb.initializeNetworkWarfare()
 	
 	return qb
 }
@@ -261,6 +266,8 @@ func (qb *QuantumBot) handleQuantumRequest(conn *websocket.Conn, req QuantumRequ
 		qb.executeSwarmConsensus(conn, req)
 	case "hardware_optimize":
 		qb.executeHardwareOptimization(conn, req)
+	case "network_attack":
+		qb.executeNetworkWarfare(conn, req)
 	default:
 		qb.sendQuantumResponse(conn, QuantumResponse{
 			Success:   false,
@@ -374,6 +381,28 @@ func (qb *QuantumBot) executeHardwareOptimization(conn *websocket.Conn, req Quan
 	})
 }
 
+func (qb *QuantumBot) executeNetworkWarfare(conn *websocket.Conn, req QuantumRequest) {
+	if qb.networkFlooder == nil {
+		qb.sendQuantumResponse(conn, QuantumResponse{
+			Success: false,
+			Message: "Network warfare not initialized",
+			Action:  "network_attack",
+		})
+		return
+	}
+	
+	qb.sendQuantumResponse(conn, QuantumResponse{
+		Success: true,
+		Message: "⚔️ Network Warfare Activated",
+		Action:  "network_attack",
+		Data: map[string]interface{}{
+			"ddos_protection": qb.ddosProtection != nil,
+			"traffic_analysis": qb.trafficAnalyzer != nil,
+			"flood_capacity": qb.networkFlooder.maxConnections,
+		},
+	})
+}
+
 // UTILITY METHODS
 func (qb *QuantumBot) getCurrentNetworkState() NetworkState {
 	if qb.networkMonitor == nil {
@@ -395,6 +424,21 @@ func (qb *QuantumBot) getCurrentNetworkState() NetworkState {
 	}
 }
 
+// Add method for MemoryPoolSniffer
+func (mps *MemoryPoolSniffer) getCompetitorActivityLevel() float64 {
+	if mps.competitorCount == 0 {
+		return 0.1 // Low activity
+	}
+	
+	// Calculate activity level based on competitor count and recent transactions
+	activityLevel := float64(mps.competitorCount) / 100.0
+	if activityLevel > 1.0 {
+		activityLevel = 1.0
+	}
+	
+	return activityLevel
+}
+
 func (qb *QuantumBot) Start(port string) error {
 	qb.isRunning = true
 	
@@ -403,6 +447,7 @@ func (qb *QuantumBot) Start(port string) error {
 	fmt.Println("🧠 AI systems: LEARNING")
 	fmt.Println("🔥 Hardware optimization: ACTIVE")
 	fmt.Println("🌐 Swarm intelligence: CONNECTED")
+	fmt.Println("⚔️ Network warfare: ARMED")
 	
 	return qb.server.Run(":" + port)
 }

@@ -4,6 +4,8 @@ import (
 	"math"
 	"math/rand"
 	"time"
+	
+	"github.com/gorilla/websocket"  // Added missing import
 )
 
 // AI SYSTEMS IMPLEMENTATION
