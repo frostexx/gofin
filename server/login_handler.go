@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"log"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stellar/go/keypair"
@@ -33,16 +34,17 @@ func (s *Server) getWalletData(ctx *gin.Context, seedPhrase string, kp *keypair.
 	g.Go(func() error {
 		balance, err := s.wallet.GetAvailableBalance(kp)
 		if err != nil {
+			log.Printf("Error getting available balance: %v", err)
 			return err
 		}
 		availableBalance = balance
-
 		return nil
 	})
 
 	g.Go(func() error {
 		txns, err := s.wallet.GetTransactions(kp, 5)
 		if err != nil {
+			log.Printf("Error getting transactions: %v", err)
 			return err
 		}
 		transactions = txns
@@ -52,6 +54,7 @@ func (s *Server) getWalletData(ctx *gin.Context, seedPhrase string, kp *keypair.
 	g.Go(func() error {
 		lb, err := s.wallet.GetLockedBalances(kp)
 		if err != nil {
+			log.Printf("Error getting locked balances: %v", err)
 			return err
 		}
 		lockedBalances = lb
@@ -59,8 +62,9 @@ func (s *Server) getWalletData(ctx *gin.Context, seedPhrase string, kp *keypair.
 	})
 
 	if err := g.Wait(); err != nil {
+		log.Printf("Login error: %v", err)
 		ctx.AbortWithStatusJSON(400, gin.H{
-			"message": err.Error(),
+			"message": fmt.Sprintf("Failed to fetch wallet data: %v", err),
 		})
 		return
 	}
@@ -79,19 +83,33 @@ func (s *Server) Login(ctx *gin.Context) {
 
 	err := ctx.BindJSON(&req)
 	if err != nil {
+		log.Printf("JSON binding error: %v", err)
 		ctx.AbortWithStatusJSON(400, gin.H{
 			"message": fmt.Sprintf("invalid request body: %v", err),
 		})
 		return
 	}
 
-	kp, err := s.wallet.Login(req.SeedPhrase)
-	if err != nil {
+	if req.SeedPhrase == "" {
+		log.Printf("Empty seed phrase provided")
 		ctx.AbortWithStatusJSON(400, gin.H{
-			"message": err.Error(),
+			"message": "seed phrase is required",
 		})
 		return
 	}
+
+	log.Printf("Login attempt for seed phrase length: %d", len(req.SeedPhrase))
+
+	kp, err := s.wallet.Login(req.SeedPhrase)
+	if err != nil {
+		log.Printf("Login failed: %v", err)
+		ctx.AbortWithStatusJSON(400, gin.H{
+			"message": fmt.Sprintf("Invalid seed phrase: %v", err),
+		})
+		return
+	}
+
+	log.Printf("Login successful for address: %s", kp.Address())
 
 	s.getWalletData(ctx, req.SeedPhrase, kp)
 }

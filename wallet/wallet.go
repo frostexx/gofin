@@ -22,12 +22,19 @@ type Wallet struct {
 }
 
 func New() *Wallet {
-	client := hClient.DefaultPublicNetClient
-	client.HorizonURL = os.Getenv("NET_URL")
+	// Fix: Ensure proper URL construction
+	netURL := os.Getenv("NET_URL")
+	if netURL == "" {
+		netURL = "https://api.mainnet.minepi.com"
+	}
+	
+	client := &hClient.Client{
+		HorizonURL: netURL,
+	}
 
 	w := &Wallet{
 		networkPassphrase: os.Getenv("NET_PASSPHRASE"),
-		serverURL:         os.Getenv("NET_URL"),
+		serverURL:         netURL,
 		client:            client,
 		baseReserve:       0.49,
 	}
@@ -39,18 +46,18 @@ func New() *Wallet {
 func (w *Wallet) GetBaseReserve() {
 	ledger, err := w.client.Ledgers(horizonclient.LedgerRequest{Order: horizonclient.OrderDesc, Limit: 1})
 	if err != nil {
-		fmt.Println(err)
+		fmt.Printf("Error getting base reserve: %v\n", err)
 		return
 	}
 
 	if len(ledger.Embedded.Records) == 0 {
-		fmt.Println(err)
+		fmt.Println("No ledger records found")
 		return
 	}
 
 	baseReserveStr := ledger.Embedded.Records[0].BaseReserve
 	w.baseReserve = float64(baseReserveStr) / 1e7
-	fmt.Println(w.baseReserve)
+	fmt.Printf("Base reserve: %f\n", w.baseReserve)
 }
 
 func (w *Wallet) GetAddress(kp *keypair.Full) string {
@@ -119,72 +126,22 @@ func (w *Wallet) GetTransactions(kp *keypair.Full, limit uint) ([]operations.Ope
 }
 
 func (w *Wallet) GetLockedBalances(kp *keypair.Full) ([]horizon.ClaimableBalance, error) {
-	req := hClient.ClaimableBalanceRequest{
+	cbReq := hClient.ClaimableBalanceRequest{
 		Claimant: kp.Address(),
-		Limit:    50,
 	}
-
-	res, err := w.client.ClaimableBalances(req)
+	balances, err := w.client.ClaimableBalances(cbReq)
 	if err != nil {
-		return nil, fmt.Errorf("error fetching locked balances: %v", err)
+		return nil, fmt.Errorf("error fetching claimable balances: %v", err)
 	}
 
-	return res.Embedded.Records, nil
+	return balances.Embedded.Records, nil
 }
 
-func (w *Wallet) ClaimAndWithdraw(kp *keypair.Full, amount float64, balanceID, address string) (string, error) {
-	account, err := w.GetAccount(kp)
+func (w *Wallet) GetClaimableBalance(balanceID string) (horizon.ClaimableBalance, error) {
+	balance, err := w.client.ClaimableBalance(balanceID)
 	if err != nil {
-		return "", err
+		return horizon.ClaimableBalance{}, fmt.Errorf("error fetching claimable balance: %v", err)
 	}
 
-	claimOp := txnbuild.ClaimClaimableBalance{
-		BalanceID: balanceID,
-	}
-
-	paymentOp := txnbuild.Payment{
-		Destination: address,
-		Amount:      strconv.FormatFloat(amount, 'f', -1, 64),
-		Asset:       txnbuild.NativeAsset{},
-	}
-
-	txParams := txnbuild.TransactionParams{
-		SourceAccount:        &account,
-		IncrementSequenceNum: true,
-		Operations:           []txnbuild.Operation{&claimOp, &paymentOp},
-		BaseFee:              1_000_000,
-		Preconditions: txnbuild.Preconditions{
-			TimeBounds: txnbuild.NewInfiniteTimeout(),
-		},
-	}
-
-	tx, err := txnbuild.NewTransaction(txParams)
-	if err != nil {
-		return "", fmt.Errorf("error building transaction: %v", err)
-	}
-
-	signedTx, err := tx.Sign(w.networkPassphrase, kp)
-	if err != nil {
-		return "", fmt.Errorf("error signing transaction: %v", err)
-	}
-
-	resp, err := w.client.SubmitTransaction(signedTx)
-	if err != nil {
-		return "", fmt.Errorf("error submitting transaction: %v", err)
-	}
-
-	if !resp.Successful {
-		return "", fmt.Errorf("transaction failed")
-	}
-
-	return resp.Hash, nil
-}
-
-func (w *Wallet) GetClaimableBalance(balanceID string) (*horizon.ClaimableBalance, error) {
-	res, err := w.client.ClaimableBalance(balanceID)
-	if err != nil {
-		return nil, fmt.Errorf("error fetching locked balance: %v", err)
-	}
-
-	return &res, nil
+	return balance, nil
 }

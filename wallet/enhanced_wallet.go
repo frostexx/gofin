@@ -179,10 +179,16 @@ func newConnectionPool(maxClients int) *ConnectionPool {
 		maxClients: maxClients,
 	}
 	
-	// Initialize connection pool
+	// Fix: Ensure proper URL construction
+	netURL := os.Getenv("NET_URL")
+	if netURL == "" {
+		netURL = "https://api.mainnet.minepi.com"
+	}
+	
+	// Initialize connection pool with proper URL
 	for i := 0; i < maxClients; i++ {
 		client := &hClient.Client{
-			HorizonURL: os.Getenv("NET_URL"),
+			HorizonURL: netURL,
 		}
 		pool.clients[i] = client
 	}
