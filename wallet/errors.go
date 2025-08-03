@@ -6,8 +6,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/stellar/go/clients/horizonclient"
-	hClient "github.com/stellar/go/clients/horizonclient"
 	"github.com/stellar/go/keypair"
 	"github.com/stellar/go/txnbuild"
 	"github.com/stellar/go/xdr"
@@ -21,6 +19,7 @@ func getTxErrorFromResultXdr(resultXdr string) error {
 		return fmt.Errorf("failed to decode result XDR: %w", err)
 	}
 
+	// Transaction-level error
 	if txResult.Result.Code != xdr.TransactionResultCodeTxSuccess {
 		return fmt.Errorf("transaction failed with code: %s", txResult.Result.Code.String())
 	}
@@ -57,20 +56,23 @@ func getTxErrorFromResultXdr(resultXdr string) error {
 	return nil
 }
 
-// Enhanced transfer with priority and dynamic fees
-func (w *Wallet) TransferWithPriority(kp *keypair.Full, amountStr string, address string, priority bool) error {
-	baseReserve := w.GetCachedBaseReserve()
+func (w *Wallet) Transfer(kp *keypair.Full, amountStr string, address string) error {
+	w.GetBaseReserve()
+	baseReserve := w.baseReserve
 
+	// Parse requested amount
 	requestedAmount, err := strconv.ParseFloat(amountStr, 64)
 	if err != nil {
 		return fmt.Errorf("invalid amount: %w", err)
 	}
 
-	account, err := w.GetAccountWithRetry(kp)
+	// Get account details
+	account, err := w.GetAccount(kp)
 	if err != nil {
 		return fmt.Errorf("error getting account: %w", err)
 	}
 
+	// Get actual native (PI) balance
 	var nativeBalance float64
 	for _, bal := range account.Balances {
 		if bal.Asset.Type == "native" {
@@ -82,98 +84,50 @@ func (w *Wallet) TransferWithPriority(kp *keypair.Full, amountStr string, addres
 		}
 	}
 
+	// Calculate minimum required balance
 	minBalance := baseReserve * float64(2+account.SubentryCount)
-	available := nativeBalance - minBalance - 0.00001
 
+	// Available balance = total - reserve - 1 base fee
+	available := nativeBalance - minBalance - 0.00001
 	if available <= 0 {
 		return fmt.Errorf("insufficient available balance")
 	}
 
 	requestedAmount = available - 0.01
 
+	// Ensure requested amount is transferable
 	if requestedAmount > available {
 		return fmt.Errorf("requested amount %.7f exceeds available balance %.7f", requestedAmount, available)
 	}
 
-	// Dynamic fee calculation
-	networkCongestion := w.estimateNetworkCongestion()
-	optimalFee := w.feeStrategy.GetOptimalFee(networkCongestion, priority)
-
-	return w.executeTransferWithRetry(kp, requestedAmount, address, optimalFee, priority)
-}
-
-func (w *Wallet) Transfer(kp *keypair.Full, amountStr string, address string) error {
-	return w.TransferWithPriority(kp, amountStr, address, false)
-}
-
-func (w *Wallet) executeTransferWithRetry(kp *keypair.Full, amount float64, address string, fee int64, priority bool) error {
-	maxAttempts := 10
-	if priority {
-		maxAttempts = 25
-	}
-
-	for attempt := 0; attempt < maxAttempts; attempt++ {
-		err := w.attemptTransfer(kp, amount, address, fee)
-		if err == nil {
-			return nil
-		}
-
-		// Escalate fee on retry
-		if attempt > 2 && priority {
-			fee = int64(float64(fee) * 1.5)
-			if fee > w.feeStrategy.maxFee {
-				fee = w.feeStrategy.maxFee
-			}
-		}
-
-		// Adaptive delay
-		delay := time.Duration(100+attempt*50) * time.Millisecond
-		if priority {
-			delay = time.Duration(50+attempt*25) * time.Millisecond
-		}
-		time.Sleep(delay)
-	}
-
-	return fmt.Errorf("transfer failed after %d attempts", maxAttempts)
-}
-
-func (w *Wallet) attemptTransfer(kp *keypair.Full, amount float64, address string, fee int64) error {
-	client := w.connectionPool.GetClient()
-	
-	account, err := client.AccountDetail(hClient.AccountRequest{AccountID: kp.Address()})
-	if err != nil {
-		return err
-	}
-
-	amountStr := fmt.Sprintf("%.7f", amount)
-	
+	// Build payment operation
 	paymentOp := txnbuild.Payment{
 		Destination: address,
-		Amount:      amountStr,
+		Amount:      strconv.FormatFloat(requestedAmount, 'f', 7, 64),
 		Asset:       txnbuild.NativeAsset{},
 	}
 
-	tx, err := txnbuild.NewTransaction(
-		txnbuild.TransactionParams{
-			SourceAccount:        &account,
-			IncrementSequenceNum: true,
-			Operations:           []txnbuild.Operation{&paymentOp},
-			BaseFee:              fee,
-			Preconditions: txnbuild.Preconditions{
-				TimeBounds: txnbuild.NewTimeout(300), // 5 minute timeout
-			},
-		},
-	)
+	// Build transaction
+	txParams := txnbuild.TransactionParams{
+		SourceAccount:        &account,
+		IncrementSequenceNum: true,
+		Operations:           []txnbuild.Operation{&paymentOp},
+		BaseFee:              txnbuild.MinBaseFee,
+		Preconditions:        txnbuild.Preconditions{TimeBounds: txnbuild.NewInfiniteTimeout()},
+	}
+
+	tx, err := txnbuild.NewTransaction(txParams)
 	if err != nil {
 		return fmt.Errorf("error building transaction: %w", err)
 	}
 
-	tx, err = tx.Sign(w.networkPassphrase, kp)
+	// Sign and submit
+	signedTx, err := tx.Sign(w.networkPassphrase, kp)
 	if err != nil {
 		return fmt.Errorf("error signing transaction: %w", err)
 	}
 
-	resp, err := client.SubmitTransaction(tx)
+	resp, err := w.client.SubmitTransaction(signedTx)
 	if err != nil {
 		return fmt.Errorf("error submitting transaction: %w", err)
 	}
@@ -182,106 +136,67 @@ func (w *Wallet) attemptTransfer(kp *keypair.Full, amount float64, address strin
 		return getTxErrorFromResultXdr(resp.ResultXdr)
 	}
 
+	fmt.Println("Transaction successful:", resp.Hash)
 	return nil
 }
 
-func (w *Wallet) estimateNetworkCongestion() float64 {
-	client := w.connectionPool.GetClient()
-	
-	// Get recent ledgers to estimate congestion
-	ledgers, err := client.Ledgers(horizonclient.LedgerRequest{
-		Order: horizonclient.OrderDesc,
-		Limit: 5,
-	})
+func (w *Wallet) WithdrawClaimableBalance(kp *keypair.Full, amountStr, balanceID, address string) (string, float64, error) {
+	amount, err := strconv.ParseFloat(amountStr, 64)
 	if err != nil {
-		return 0.5 // Default moderate congestion
+		return "", 0, fmt.Errorf("error formatting amount: %s", err.Error())
+	}
+	amount = amount - 0.01
+
+	hash, err := w.ClaimAndWithdraw(kp, amount, balanceID, address)
+	if err != nil {
+		return "", amount, fmt.Errorf("error claiming and withdrawing: %v", err)
 	}
 
-	totalOps := 0
-	for _, ledger := range ledgers.Embedded.Records {
-		totalOps += int(ledger.OperationCount)
-	}
-
-	// Estimate congestion based on operation count
-	avgOps := float64(totalOps) / 5.0
-	congestion := avgOps / 1000.0 // Normalize to 0-1 range
-	
-	if congestion > 1.0 {
-		congestion = 1.0
-	}
-	
-	return congestion
+	return hash, amount, nil
 }
 
-// Enhanced claim operation with atomic claim+withdraw
-func (w *Wallet) ClaimAndWithdrawAtomic(kp *keypair.Full, balanceID string, withdrawAddress string) error {
-	client := w.connectionPool.GetClient()
-	
-	account, err := client.AccountDetail(hClient.AccountRequest{AccountID: kp.Address()})
+func (w *Wallet) CreateClaimable(kp *keypair.Full, recipientAddress string, amount float64) (string, error) {
+	senderAccount, err := w.GetAccount(kp)
 	if err != nil {
-		return fmt.Errorf("error getting account: %w", err)
+		return "", err
 	}
 
-	// Build atomic transaction with claim + withdraw
-	claimOp := txnbuild.ClaimClaimableBalance{
-		BalanceID: balanceID,
+	t := time.Now().Add(10 * time.Minute)
+	claimant := txnbuild.Claimant{
+		Destination: recipientAddress,
+		Predicate:   txnbuild.NotPredicate(txnbuild.BeforeAbsoluteTimePredicate(t.Unix())),
 	}
 
-	// Get claimable balance to determine amount
-	cb, err := client.ClaimableBalance(balanceID)
-	if err != nil {
-		return fmt.Errorf("error getting claimable balance: %w", err)
+	createOp := txnbuild.CreateClaimableBalance{
+		Asset:        txnbuild.NativeAsset{},
+		Amount:       fmt.Sprintf("%.2f", amount),
+		Destinations: []txnbuild.Claimant{claimant},
 	}
 
-	// Calculate withdrawal amount (leave minimum balance)
-	claimAmount, _ := strconv.ParseFloat(cb.Amount, 64)
-	baseReserve := w.GetCachedBaseReserve()
-	minBalance := baseReserve * float64(2+account.SubentryCount)
-	withdrawAmount := claimAmount - minBalance - 0.01
-
-	var operations []txnbuild.Operation
-	operations = append(operations, &claimOp)
-
-	if withdrawAmount > 0 {
-		paymentOp := txnbuild.Payment{
-			Destination: withdrawAddress,
-			Amount:      fmt.Sprintf("%.7f", withdrawAmount),
-			Asset:       txnbuild.NativeAsset{},
-		}
-		operations = append(operations, &paymentOp)
-	}
-
-	// Use maximum priority fee for atomic operations
-	priorityFee := w.feeStrategy.GetOptimalFee(1.0, true)
-
-	tx, err := txnbuild.NewTransaction(
-		txnbuild.TransactionParams{
-			SourceAccount:        &account,
-			IncrementSequenceNum: true,
-			Operations:           operations,
-			BaseFee:              priorityFee,
-			Preconditions: txnbuild.Preconditions{
-				TimeBounds: txnbuild.NewTimeout(300),
-			},
+	txParams := txnbuild.TransactionParams{
+		SourceAccount:        &senderAccount,
+		IncrementSequenceNum: true,
+		Operations:           []txnbuild.Operation{&createOp},
+		BaseFee:              1_000_000, //txnbuild.MinBaseFee,
+		Preconditions: txnbuild.Preconditions{
+			TimeBounds: txnbuild.NewInfiniteTimeout(),
 		},
-	)
+	}
+
+	tx, err := txnbuild.NewTransaction(txParams)
 	if err != nil {
-		return fmt.Errorf("error building atomic transaction: %w", err)
+		return "", fmt.Errorf("error building transaction: %v", err)
 	}
 
-	tx, err = tx.Sign(w.networkPassphrase, kp)
+	signedTx, err := tx.Sign(w.networkPassphrase, kp)
 	if err != nil {
-		return fmt.Errorf("error signing atomic transaction: %w", err)
+		return "", fmt.Errorf("error signing transaction: %v", err)
 	}
 
-	resp, err := client.SubmitTransaction(tx)
+	resp, err := w.client.SubmitTransaction(signedTx)
 	if err != nil {
-		return fmt.Errorf("error submitting atomic transaction: %w", err)
+		return "", fmt.Errorf("error submitting transaction: %v", err)
 	}
 
-	if !resp.Successful {
-		return getTxErrorFromResultXdr(resp.ResultXdr)
-	}
-
-	return nil
+	return resp.Hash, nil
 }
