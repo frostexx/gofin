@@ -1886,11 +1886,14 @@ func (ew *EnhancedWallet) updateTransactionStatistics(request TransactionRequest
 	stats.realTimeStats.lastUpdate = time.Now()
 	
 	total := atomic.LoadInt64(&ew.performanceTracker.transactionMetrics.totalTransactions)
-	// Remove this line: successful := atomic.LoadInt64(&ew.performanceTracker.transactionMetrics.successfulTransactions)
+	successful := atomic.LoadInt64(&ew.performanceTracker.transactionMetrics.successfulTransactions)
 	
 	if total > 0 {
 		stats.realTimeStats.currentTPS = float64(total) / time.Since(ew.performanceTracker.transactionMetrics.lastUpdate).Seconds()
+		// Use the successful variable to calculate success rate
+		stats.realTimeStats.successRate = float64(successful) / float64(total) * 100
 	}
+}
 	
 	// Update daily stats
 	today := time.Now().Format("2006-01-02")
