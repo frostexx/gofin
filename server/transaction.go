@@ -156,11 +156,10 @@ func (th *TransactionHandler) fetchRecentTransactions() ([]StellarTransaction, e
 	transactions := make([]StellarTransaction, 0)
 	
 	for _, tx := range txPage.Embedded.Records {
-		// Get fee from the transaction - use MaxFee if FeePaid is not available
+		// Get fee from the transaction - Fixed: properly handle int64 MaxFee
 		fee := int64(100) // Default fee
-		if tx.MaxFee != "" {
-			// Parse MaxFee string to int64 (simplified)
-			fee = 100 // Use default for now
+		if tx.MaxFee > 0 {
+			fee = tx.MaxFee // Use MaxFee directly since it's already int64
 		}
 		
 		stellarTx := StellarTransaction{
