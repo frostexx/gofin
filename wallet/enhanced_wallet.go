@@ -11,7 +11,7 @@ import (
 
 	"github.com/stellar/go/keypair"
 	"github.com/stellar/go/txnbuild"
-	"github.com/stellar/go/protocols/horizon"
+	// "github.com/stellar/go/protocols/horizon"
 )
 
 // ENHANCED WALLET WITH QUANTUM FEATURES
@@ -595,6 +595,7 @@ type RealTimeStats struct {
 	memoryUsage       float64
 	cpuUsage          float64
 	lastUpdate        time.Time
+	successRate       float64
 }
 
 type TrendAnalysis struct {
@@ -1893,7 +1894,6 @@ func (ew *EnhancedWallet) updateTransactionStatistics(request TransactionRequest
 		// Use the successful variable to calculate success rate
 		stats.realTimeStats.successRate = float64(successful) / float64(total) * 100
 	}
-}
 	
 	// Update daily stats
 	today := time.Now().Format("2006-01-02")
