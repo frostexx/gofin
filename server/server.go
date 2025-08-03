@@ -307,8 +307,9 @@ func (qb *QuantumBot) setupRoutes() {
 	
 	// Serve React frontend for all other routes (SPA fallback)
 	qb.server.NoRoute(func(c *gin.Context) {
-		// Don't serve index.html for API routes
 		path := c.Request.URL.Path
+		
+		// Check if it's an API route - need to check length first!
 		if len(path) >= 4 && (path[:4] == "/api" || path[:4] == "/auth") {
 			c.JSON(http.StatusNotFound, gin.H{
 				"error":   "API endpoint not found",
@@ -319,7 +320,8 @@ func (qb *QuantumBot) setupRoutes() {
 			return
 		}
 		
-		if path[:3] == "/ws" {
+		// Check if it's WebSocket route - need to check length first!
+		if len(path) >= 3 && path[:3] == "/ws" {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"error":   "WebSocket endpoint requires upgrade",
 				"message": "Use WebSocket protocol to connect to this endpoint",
