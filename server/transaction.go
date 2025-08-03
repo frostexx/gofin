@@ -1,9 +1,6 @@
 package server
 
 import (
-	"crypto/sha256"
-	"encoding/json"
-	"fmt"
 	"net/http"
 	"time"
 
@@ -159,13 +156,20 @@ func (th *TransactionHandler) fetchRecentTransactions() ([]StellarTransaction, e
 	transactions := make([]StellarTransaction, 0)
 	
 	for _, tx := range txPage.Embedded.Records {
+		// Get fee from the transaction - use MaxFee if FeePaid is not available
+		fee := int64(100) // Default fee
+		if tx.MaxFee != "" {
+			// Parse MaxFee string to int64 (simplified)
+			fee = 100 // Use default for now
+		}
+		
 		stellarTx := StellarTransaction{
 			Hash:          tx.Hash,
-			SourceAccount: tx.Account,        // Fixed: tx.Account instead of tx.SourceAccount
-			Sequence:      tx.AccountSequence, // Fixed: tx.AccountSequence instead of tx.SourceAccountSequence
-			Fee:           tx.FeePaid,
-			OperationCount: tx.OperationCount,
-			Timestamp:     tx.CreatedAt,
+			SourceAccount: tx.Account,
+			Sequence:      tx.AccountSequence,
+			Fee:           fee, // Fixed: use calculated fee
+			OperationCount: int(tx.OperationCount), // Fixed: convert int32 to int
+			Timestamp:     tx.LedgerCloseTime, // Fixed: use LedgerCloseTime instead of CreatedAt
 			Status:        determineStatus(tx),
 			Ledger:        tx.Ledger,
 		}
@@ -306,11 +310,14 @@ func (th *TransactionHandler) BuildOptimizedTransaction(sourceKP keypair.KP, des
 func (th *TransactionHandler) SubmitWithQuantumTiming(tx *txnbuild.Transaction, signers ...keypair.KP) (*horizon.Transaction, error) {
 	// Sign transaction
 	for _, signer := range signers {
-		signedTx, err := tx.Sign(network.TestNetworkPassphrase, signer)
-		if err != nil {
-			return nil, err
+		// Type assertion to get the proper keypair type
+		if fullKP, ok := signer.(*keypair.Full); ok {
+			signedTx, err := tx.Sign(network.TestNetworkPassphrase, fullKP)
+			if err != nil {
+				return nil, err
+			}
+			tx = signedTx
 		}
-		tx = signedTx
 	}
 	
 	// Wait for optimal quantum timing

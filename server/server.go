@@ -56,6 +56,10 @@ type QuantumBot struct {
 	// Security
 	securityManager    *SecurityManager
 	
+	// Handlers
+	transactionHandler *TransactionHandler
+	loginHandler       *LoginHandler
+	
 	// State
 	isRunning          bool
 	startTime          time.Time
@@ -167,6 +171,7 @@ func NewQuantumBot() *QuantumBot {
 	
 	// Initialize all subsystems
 	qb.initializeServer()
+	qb.initializeHandlers()
 	qb.initializeHardwareOptimizations()
 	qb.initializeQuantumSystems()
 	qb.initializeAISystems()
@@ -201,6 +206,14 @@ func (qb *QuantumBot) initializeServer() {
 	qb.setupRoutes()
 }
 
+func (qb *QuantumBot) initializeHandlers() {
+	// Initialize transaction handler
+	qb.transactionHandler = NewTransactionHandler(qb)
+	
+	// Initialize login handler
+	qb.loginHandler = NewLoginHandler(qb)
+}
+
 func (qb *QuantumBot) setupRoutes() {
 	// Health check
 	qb.server.GET("/health", func(c *gin.Context) {
@@ -214,12 +227,49 @@ func (qb *QuantumBot) setupRoutes() {
 	// WebSocket endpoint
 	qb.server.GET("/ws", qb.handleWebSocket)
 	
+	// Authentication routes
+	auth := qb.server.Group("/auth")
+	{
+		auth.POST("/login", qb.loginHandler.HandleLogin)
+		auth.POST("/logout", qb.loginHandler.HandleLogout)
+		auth.GET("/session", qb.loginHandler.HandleSessionCheck)
+	}
+	
 	// API endpoints
 	api := qb.server.Group("/api/v1")
 	{
 		api.GET("/status", qb.handleStatus)
 		api.GET("/metrics", qb.handleMetrics)
 		api.POST("/quantum", qb.handleQuantumAction)
+		
+		// Transaction endpoints
+		api.GET("/transactions/monitor", qb.transactionHandler.MonitorTransactions)
+		api.GET("/transactions/history", qb.transactionHandler.GetTransactionHistory)
+		api.POST("/transactions/optimize", qb.transactionHandler.OptimizeTransaction)
+		api.GET("/transactions/conditions", func(c *gin.Context) {
+			conditions := qb.transactionHandler.AnalyzeNetworkConditions()
+			c.JSON(http.StatusOK, conditions)
+		})
+	}
+	
+	// Protected routes
+	protected := qb.server.Group("/api/v1/protected")
+	protected.Use(qb.loginHandler.AuthMiddleware())
+	{
+		protected.GET("/swarm/status", func(c *gin.Context) {
+			status := qb.getSwarmStatus()
+			c.JSON(http.StatusOK, status)
+		})
+		
+		protected.GET("/warfare/status", func(c *gin.Context) {
+			status := qb.getNetworkWarfareStatus()
+			c.JSON(http.StatusOK, status)
+		})
+		
+		protected.GET("/quantum/status", func(c *gin.Context) {
+			status := qb.getQuantumStatus()
+			c.JSON(http.StatusOK, status)
+		})
 	}
 }
 
@@ -294,6 +344,8 @@ func (qb *QuantumBot) handleStatus(c *gin.Context) {
 		"quantum":    qb.quantumTimer != nil,
 		"ai":         qb.neuralPredictor != nil,
 		"swarm":      len(qb.swarmNodes),
+		"build_time": qb.startTime.Format(time.RFC3339),
+		"version":    "2.0.0-quantum",
 	})
 }
 
@@ -439,6 +491,27 @@ func (mps *MemoryPoolSniffer) getCompetitorActivityLevel() float64 {
 	return activityLevel
 }
 
+func (qb *QuantumBot) getQuantumStatus() map[string]interface{} {
+	return map[string]interface{}{
+		"timer": map[string]interface{}{
+			"coherence":    qb.quantumTimer.quantumState.coherence,
+			"fidelity":     qb.quantumTimer.quantumState.fidelity,
+			"precision":    "nanosecond",
+			"base_time":    qb.quantumTimer.baseTimestamp.Unix(),
+		},
+		"rng": map[string]interface{}{
+			"entropy":     qb.quantumRNG.entropyLevel,
+			"buffer_size": qb.quantumRNG.bufferSize,
+			"verified":    qb.quantumRNG.verification.passed,
+		},
+		"crypto": map[string]interface{}{
+			"key_length":     qb.quantumCrypto.keyDistribution.keyLength,
+			"security_level": qb.quantumCrypto.keyDistribution.securityLevel,
+			"participants":   len(qb.quantumCrypto.keyDistribution.participants),
+		},
+	}
+}
+
 func (qb *QuantumBot) Start(port string) error {
 	qb.isRunning = true
 	
@@ -448,6 +521,7 @@ func (qb *QuantumBot) Start(port string) error {
 	fmt.Println("🔥 Hardware optimization: ACTIVE")
 	fmt.Println("🌐 Swarm intelligence: CONNECTED")
 	fmt.Println("⚔️ Network warfare: ARMED")
+	fmt.Println("📊 Transaction monitoring: ACTIVE")
 	
 	return qb.server.Run(":" + port)
 }
