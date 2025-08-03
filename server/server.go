@@ -650,26 +650,7 @@ func (qb *QuantumBot) handleAdminShutdown(c *gin.Context) {
 	}()
 }
 
-// QUANTUM ACTION HANDLERS
-func (qb *QuantumBot) executeQuantumAIPredict(conn *websocket.Conn, req QuantumRequest) {
-	// Simulate AI prediction
-	prediction := map[string]interface{}{
-		"market_trend":    "bullish",
-		"confidence":      0.87,
-		"optimal_timing":  time.Now().Add(30 * time.Minute).Unix(),
-		"risk_level":      "medium",
-	}
-	
-	qb.sendQuantumResponse(conn, QuantumResponse{
-		Success:            true,
-		Message:            "🧠 AI Prediction Generated",
-		Action:             "quantum_predict",
-		Data:               prediction,
-		AIConfidence:       0.87,
-		PredictionAccuracy: 0.92,
-	})
-}
-
+// QUANTUM ACTION HANDLERS (only the ones not in other files)
 func (qb *QuantumBot) executeQuantumTiming(conn *websocket.Conn, req QuantumRequest) {
 	optimalTime := qb.getQuantumPrecisionTime()
 	
@@ -817,64 +798,6 @@ func (mps *MemoryPoolSniffer) getCompetitorActivityLevel() float64 {
 	}
 	
 	return activityLevel
-}
-
-func (qb *QuantumBot) getQuantumStatus() map[string]interface{} {
-	status := map[string]interface{}{
-		"timer": map[string]interface{}{
-			"coherence":  0.98,
-			"fidelity":   0.99,
-			"precision":  "nanosecond",
-			"base_time":  qb.startTime.Unix(),
-		},
-		"rng": map[string]interface{}{
-			"entropy":     0.99,
-			"buffer_size": 1024,
-			"verified":    true,
-		},
-		"crypto": map[string]interface{}{
-			"key_length":     256,
-			"security_level": "post-quantum",
-			"participants":   2,
-		},
-	}
-	
-	if qb.quantumTimer != nil && qb.quantumTimer.quantumState != nil {
-		status["timer"].(map[string]interface{})["coherence"] = qb.quantumTimer.quantumState.coherence
-		status["timer"].(map[string]interface{})["fidelity"] = qb.quantumTimer.quantumState.fidelity
-	}
-	
-	return status
-}
-
-func (qb *QuantumBot) getSwarmStatus() map[string]interface{} {
-	return map[string]interface{}{
-		"total_nodes":    len(qb.swarmNodes),
-		"active_nodes":   len(qb.swarmNodes),
-		"consensus_rounds": func() int64 {
-			if qb.consensusEngine != nil {
-				return qb.consensusEngine.currentRound
-			}
-			return 0
-		}(),
-		"ledger_blocks": func() int {
-			if qb.distributedLedger != nil {
-				return len(qb.distributedLedger.blocks)
-			}
-			return 1
-		}(),
-		"network_health": "excellent",
-	}
-}
-
-func (qb *QuantumBot) getNetworkWarfareStatus() map[string]interface{} {
-	return map[string]interface{}{
-		"ddos_protection": true,
-		"active_threats":  0,
-		"blocked_ips":     0,
-		"firewall_rules":  len(qb.securityManager.firewallRules),
-		"status":          "armed",
-	}
 }
 
 func (qb *QuantumBot) Start(port string) error {
