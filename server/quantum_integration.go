@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// ENFORCEMENT LEVEL TYPE - Added to fix undefined type
+// ENFORCEMENT LEVEL TYPE
 type EnforcementLevel int
 
 const (
@@ -538,7 +538,7 @@ func (qb *QuantumBot) initializeQuantumCrypto() {
 				authority:  "quantum-timestamp-authority",
 				timestamps: make([]QuantumTimestamp, 0),
 				accuracy:   1 * time.Nanosecond,
-				precision:  100 * time.Picosecond,
+				precision:  100 * time.Nanosecond, // Fixed: using Nanosecond instead of Picosecond
 			},
 		},
 	}

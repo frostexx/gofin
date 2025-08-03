@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"os"
 	"runtime"
 	"syscall"
 	"time"
@@ -423,10 +424,10 @@ func (qb *QuantumBot) optimizeGarbageCollection() {
 	totalAlloc := memStats.TotalAlloc
 	if totalAlloc > 1024*1024*1024 { // > 1GB
 		// High memory usage - more aggressive GC
-		fmt.Setenv("GOGC", "50")
+		os.Setenv("GOGC", "50") // Fixed: os.Setenv instead of fmt.Setenv
 	} else {
 		// Normal memory usage
-		fmt.Setenv("GOGC", "100")
+		os.Setenv("GOGC", "100") // Fixed: os.Setenv instead of fmt.Setenv
 	}
 }
 
@@ -566,12 +567,20 @@ func (qb *QuantumBot) batchSystemCalls() {
 	// This reduces context switching overhead
 	
 	// Example: batch multiple socket operations
-	var calls []syscall.Syscall
-	calls = append(calls, syscall.Syscall{})
+	type SystemCall struct {
+		trap uintptr
+		a1   uintptr
+		a2   uintptr
+		a3   uintptr
+	}
+	
+	var calls []SystemCall
+	calls = append(calls, SystemCall{}) // Fixed: proper struct type
 	
 	// Execute batched calls (platform-specific)
 	for _, call := range calls {
-		_ = call // Process call
+		// Use the actual syscall function
+		_, _, _ = syscall.Syscall(call.trap, call.a1, call.a2, call.a3)
 	}
 }
 

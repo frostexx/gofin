@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/stellar/go/clients/horizonclient"
+	"github.com/stellar/go/keypair"
 	"github.com/stellar/go/network"
 	"github.com/stellar/go/protocols/horizon"
 	"github.com/stellar/go/txnbuild"
@@ -16,9 +17,9 @@ import (
 
 // TRANSACTION HANDLER
 type TransactionHandler struct {
-	bot            *QuantumBot  // Changed from Server to QuantumBot
+	bot            *QuantumBot
 	stellarClient  *horizonclient.Client
-	networkMonitor *TransactionNetworkMonitor  // Renamed to avoid conflict
+	networkMonitor *TransactionNetworkMonitor
 }
 
 type TransactionNetworkMonitor struct {
@@ -49,7 +50,7 @@ type FeeTrend struct {
 	TxCount     int
 }
 
-func NewTransactionHandler(bot *QuantumBot) *TransactionHandler {  // Changed from Server to QuantumBot
+func NewTransactionHandler(bot *QuantumBot) *TransactionHandler {
 	client := horizonclient.DefaultTestNetClient
 	
 	return &TransactionHandler{
@@ -160,8 +161,8 @@ func (th *TransactionHandler) fetchRecentTransactions() ([]StellarTransaction, e
 	for _, tx := range txPage.Embedded.Records {
 		stellarTx := StellarTransaction{
 			Hash:          tx.Hash,
-			SourceAccount: tx.SourceAccount,
-			Sequence:      tx.SourceAccountSequence,
+			SourceAccount: tx.Account,        // Fixed: tx.Account instead of tx.SourceAccount
+			Sequence:      tx.AccountSequence, // Fixed: tx.AccountSequence instead of tx.SourceAccountSequence
 			Fee:           tx.FeePaid,
 			OperationCount: tx.OperationCount,
 			Timestamp:     tx.CreatedAt,
@@ -263,7 +264,7 @@ func (th *TransactionHandler) getRecentTransactions(limit int) []StellarTransact
 }
 
 // TRANSACTION BUILDING HELPERS
-func (th *TransactionHandler) BuildOptimizedTransaction(sourceKP *txnbuild.SimpleKeypair, destAccount string, amount string) (*txnbuild.Transaction, error) {
+func (th *TransactionHandler) BuildOptimizedTransaction(sourceKP keypair.KP, destAccount string, amount string) (*txnbuild.Transaction, error) {
 	// Get source account details
 	sourceAccountRequest := horizonclient.AccountRequest{AccountID: sourceKP.Address()}
 	sourceAccount, err := th.stellarClient.AccountDetail(sourceAccountRequest)
@@ -302,13 +303,14 @@ func (th *TransactionHandler) BuildOptimizedTransaction(sourceKP *txnbuild.Simpl
 	return tx, nil
 }
 
-func (th *TransactionHandler) SubmitWithQuantumTiming(tx *txnbuild.Transaction, signers ...*txnbuild.SimpleKeypair) (*horizon.Transaction, error) {
+func (th *TransactionHandler) SubmitWithQuantumTiming(tx *txnbuild.Transaction, signers ...keypair.KP) (*horizon.Transaction, error) {
 	// Sign transaction
 	for _, signer := range signers {
-		tx, err := tx.Sign(network.TestNetworkPassphrase, signer)
+		signedTx, err := tx.Sign(network.TestNetworkPassphrase, signer)
 		if err != nil {
 			return nil, err
 		}
+		tx = signedTx
 	}
 	
 	// Wait for optimal quantum timing

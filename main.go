@@ -4,43 +4,90 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"pi/server"
+	"os/signal"
+	"syscall"
 
+	"pi/server"
+	
 	"github.com/fatih/color"
 	"github.com/joho/godotenv"
 )
 
-func loadConfig() error {
+func main() {
+	// Load environment variables
 	err := godotenv.Load()
 	if err != nil {
-		return fmt.Errorf("error loading env config: %v", err)
-	}
-	color.Green("loaded base env config")
-
-	network := os.Getenv("NETWORK")
-	if network != "mainnet" && network != "testnet" {
-		return fmt.Errorf("invalid network")
+		log.Println("No .env file found, using system environment variables")
 	}
 
-	rConfig := ".env." + network
-	err = godotenv.Overload(rConfig)
-	if err != nil {
-		return fmt.Errorf("error loading network specific config")
-	}
-	color.Green("loaded %s config", network)
+	// Print startup banner
+	printStartupBanner()
 
-	return nil
+	// Get port from environment
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+
+	// Create and configure QuantumBot
+	quantumBot := server.NewQuantumBot()
+
+	// Setup graceful shutdown
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		<-c
+		fmt.Println("\n🛑 Shutting down QuantumBot...")
+		quantumBot.Stop()
+		os.Exit(0)
+	}()
+
+	// Start the server
+	fmt.Printf("🌟 Starting QuantumBot on port %s...\n", port)
+	
+	if err := quantumBot.Start(port); err != nil {
+		log.Fatal("❌ Failed to start server:", err)
+	}
 }
 
-func main() {
-	err := loadConfig()
-	if err != nil {
-		log.Fatalf("%s: %v", "config", err)
-	}
+func printStartupBanner() {
+	cyan := color.New(color.FgCyan, color.Bold)
+	magenta := color.New(color.FgMagenta, color.Bold)
+	yellow := color.New(color.FgYellow, color.Bold)
+	green := color.New(color.FgGreen, color.Bold)
 
-	srv := server.New()
-	err = srv.Run(os.Getenv("APP_PORT"))
-	if err != nil {
-		log.Fatal(err)
-	}
+	fmt.Println()
+	cyan.Println("  ██████╗ ██╗   ██╗ █████╗ ███╗   ██╗████████╗██╗   ██╗███╗   ███╗")
+	cyan.Println(" ██╔═══██╗██║   ██║██╔══██╗████╗  ██║╚══██╔══╝██║   ██║████╗ ████║")
+	cyan.Println(" ██║   ██║██║   ██║███████║██╔██╗ ██║   ██║   ██║   ██║██╔████╔██║")
+	cyan.Println(" ██║▄▄ ██║██║   ██║██╔══██║██║╚██╗██║   ██║   ██║   ██║██║╚██╔╝██║")
+	cyan.Println(" ╚██████╔╝╚██████╔╝██║  ██║██║ ╚████║   ██║   ╚██████╔╝██║ ╚═╝ ██║")
+	cyan.Println("  ╚══▀▀═╝  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═══╝   ╚═╝    ╚═════╝ ╚═╝     ╚═╝")
+	fmt.Println()
+	
+	magenta.Println("  ██████╗  ██████╗ ████████╗")
+	magenta.Println("  ██╔══██╗██╔═══██╗╚══██╔══╝")
+	magenta.Println("  ██████╔╝██║   ██║   ██║   ")
+	magenta.Println("  ██╔══██╗██║   ██║   ██║   ")
+	magenta.Println("  ██████╔╝╚██████╔╝   ██║   ")
+	magenta.Println("  ╚═════╝  ╚═════╝    ╚═╝   ")
+	fmt.Println()
+
+	yellow.Println("🚀 QUANTUM-ENHANCED STELLAR AUTOMATION SYSTEM")
+	fmt.Println()
+	
+	green.Println("⚛️  Quantum Integration Systems")
+	green.Println("🧠 AI Learning & Prediction Engine")
+	green.Println("🔥 Hardware-Level Optimizations")
+	green.Println("🌐 Distributed Swarm Intelligence")
+	green.Println("⚔️  Advanced Network Warfare (Educational)")
+	green.Println("🔒 Post-Quantum Cryptography")
+	green.Println("📊 Real-Time Performance Analytics")
+	green.Println("🎯 Precision Timing & Execution")
+	
+	fmt.Println()
+	cyan.Printf("💫 System Status: ")
+	green.Println("INITIALIZING...")
+	fmt.Println()
 }
